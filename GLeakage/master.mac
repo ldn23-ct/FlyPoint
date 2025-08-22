@@ -1,0 +1,10 @@
+# 可选：设置详细信息
+/control/verbose 2
+/run/verbose 1
+/event/verbose 0
+/tracking/verbose 0
+
+# 初始化几何和物理
+/run/initialize
+/control/loop ../run.mac i 1 10 1
+# /run/beamOn 5000000
