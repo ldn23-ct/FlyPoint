@@ -1,5 +1,5 @@
 # ---- Normalize line endings: force LF everywhere ----
-*            text eol=lf
+*            text eol=auto
 
 # Binary files (never touch line endings)
 *.png        binary
