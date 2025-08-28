@@ -11,8 +11,8 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ra
     vector = np.zeros((nray,ny,nz,3))
 
     rays = np.linspace(0,ray_angle,nray)
-    voxel_size_y = obj_y / ny;
-    voxel_size_z = obj_z / nz;
+    voxel_size_y = obj_y / ny
+    voxel_size_z = obj_z / nz
     grid_origin =np.array([distance_of_source2object, - 0.5 * voxel_size_y,0])
     for p in range(nray):
         ray_vec = np.array([np.cos(rays[p]),np.sin(rays[p]),0])
