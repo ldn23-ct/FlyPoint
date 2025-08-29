@@ -52,7 +52,7 @@ def DetArray(corners: list, pixelsize: list, detsize: list):
       (1) 计算像素个数
       (2) 计算每个像素中心点
     '''
-    nx, ny = detsize[0] / pixelsize[0], detsize[1] / pixelsize[1]
+    nx, ny = int(detsize[0] / pixelsize[0]), int(detsize[1] / pixelsize[1])
     P0, P1, P2, P3 = map(np.array, corners)
     centers = []
 
@@ -105,18 +105,18 @@ class HalfSpaceCutting:
             n = -n
         return verts, n / nn, m
 
-    def loda_point(self, obj_array, det_array, m_array):
+    def loda_point(self, obj_array, det_array, r_array):
         '''
         input
           obj_array--shape:[a*b, 3]
           det_array--shape:[c*c, 3]
-          m_array--shape:[6, 3]
+          r_array--shape:[6, 3]
         output
           p--(det_array - obj_array) shape:[a*b, c*c, 3]
           q--(obj_array - m) shape:[6, a*b, 3]
         '''
         p = det_array[None, :, :] - obj_array[:, None, :]
-        q = obj_array[None, :, :] - m_array[:, None, :]
+        q = obj_array[None, :, :] - r_array[:, None, :]
         return p, q
     
     def build_six_faces(self, entrance, exit):
@@ -177,29 +177,47 @@ class HalfSpaceCutting:
         t_enter = np.where(enter_mask, ts, neg_inf)  # [6, a*b, c*c]
         tE = np.max(t_enter, axis=0)  # [a*b, c*c]
         enter_idx = np.argmax(t_enter, axis=0)
+        # print(enter_idx[0].reshape(7, 7))
         
         t_leave = np.where(exit_mask, ts, pos_inf)  # [6, a*b, c*c]
         tL = np.min(t_leave, axis=0)  # [a*b, c*c]
         exit_idx = np.argmin(t_leave, axis=0)
+        # print(exit_idx[0].reshape(7, 7))
 
         t0 = np.maximum(tE, 0)
         t1 = np.minimum(tL, 1)
 
         valid = (~outside_para_mask) & (tE < tL + eps) & (t0 < t1 + eps)
+        # print(valid[0].reshape(7, 7))
         if require_enter:
           valid = valid & (enter_idx == 0) & (exit_idx == 1)
 
         return t0, t1, valid
 
 if __name__ == "__main__":
-    A4 = [[-1, 1, 1], [-1, -1, 1], [1, -1, 1], [1, 1, 1]]
-    B4 = [[-1, 1, -1], [-1, -1, -1], [1, -1, -1], [1, 1, -1]]
+    A4 = [[-1, 1, -1], [-1, -1, -1], [1, -1, -1], [1, 1, -1]]
+    B4 = [[-1, 1, 1], [-1, -1, 1], [1, -1, 1], [1, 1, 1]]
     func = HalfSpaceCutting()
-    faces = func.build_six_faces(np.array(A4), np.array(B4))
-    for i in range(6):
-        face = faces[i]
-        print(face["name"])
-        print(face["verts"])
-        print(face["n"])
-        print(face["r"])
+    ns, rs = func.build_six_faces(np.array(A4), np.array(B4))
+    print(ns)
+    print(rs)
+    
+    # x1, x2 = np.arange(-3, 4, 3), np.arange(-3, 4)
+    # y1, y2 = np.arange(-3, 4, 3), np.arange(-3, 4)
+    # X1, Y1 = np.meshgrid(x1, y1)
+    # X2, Y2 = np.meshgrid(x2, y2)
+    # Z1, Z2 = -5*np.ones(X1.shape), 5*np.ones(X2.shape)
+    # obj = np.column_stack((X1.ravel(), Y1.ravel(), Z1.ravel())).astype(np.float64, copy=False)
+    # det = np.column_stack((X2.ravel(), Y2.ravel(), Z2.ravel())).astype(np.float64, copy=False)
+
+    obj = np.array([[-3, -3, -5]])
+    det = np.array([[3, 2, 5]])
+
+    p, q = func.loda_point(obj, det, rs)
+    t0, t1, valid = func.through_slit(p, q, ns)
+    # print(obj[4, :])
+    print(valid.reshape(p.shape[0], p.shape[1]))
+    # print(t0[0].reshape(x2.shape[0], y2.shape[0]))
+    # print(t1[0].reshape(x2.shape[0], y2.shape[0]))
+    # print(valid[0].reshape(x2.shape[0], y2.shape[0]))
 
