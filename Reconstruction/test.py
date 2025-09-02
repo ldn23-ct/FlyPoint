@@ -78,11 +78,11 @@ def DetArray(corners: list, pixelsize: list, detsize: list):
 
 class HalfSpaceCutting:
     '''
-    判断射线束是否与立方体相交，同时输出相交长度
-    (1) 根据平面角点，构造有序顶点集合并计算向外法向量
-    (2) 读取空间点集合，构造 {pi, qi} 矩阵
-    (3) 验证线段是否与平面相交，若相交求出参数t
-    (4) 对六面取交集，判断是否经过狭缝，输出mask
+    判断射线束是否与立方体相交，同时输出相交长度 \\
+    (1) 根据平面角点，构造有序顶点集合并计算向外法向量 \\
+    (2) 读取空间点集合，构造 {pi, qi} 矩阵 \\
+    (3) 验证线段是否与平面相交，若相交求出参数t \\
+    (4) 对六面取交集，判断是否经过狭缝，输出mask \\
     (5) 对于经过狭缝的射线，计算出射衰减
     '''
     def plane_normal(self, verts: np.ndarray, centroid: np.ndarray):
@@ -194,18 +194,35 @@ class HalfSpaceCutting:
 
         return t0, t1, valid
 
-class ScatterVec():
+class ScatterVec:
     '''
-    在半裁剪算法的基础上, 计算出射衰减, 以及是否穿过狭缝
-    input:
-      objcorners--模体角点, 需要计算射线路径, ndarray of shape: [8, 3]
-      slitcorners--狭缝角点, 需要计算是否穿过狭缝, ndarray of shape: [8, 3]
-    output:
-      
+    在半裁剪算法的基础上, 计算出射衰减, 以及是否穿过狭缝 \\
+    input: \\
+      objcorners--模体角点, 需要计算射线路径, ndarray of shape: [8, 3] \\
+      slitcorners--狭缝角点, 需要计算是否穿过狭缝, ndarray of shape: [8, 3] \\
+      obj--模体采样点, ndarray of shape: [m, 3] \\
+      det--探测器采样点, ndarray of shape: [n, 3] \\
+    output: \\
+      ScatterVector--散射射线向量, 被遮挡记作nan, 否则方向表示向量, 模长表示衰减, ndarray of shape: [a*b, c*c] \\
+      Angle--与探测器夹角余弦值, 用于计算kn项
     '''
+    def __init__(self, objcorners, slitcorners):
+        self.hc = HalfSpaceCutting()
+        self.ns_obj, self.rs_obj = self.hc.build_six_faces(objcorners[0:4], objcorners[4:])
+        self.ns_slit, self.rs_slit = self.hc.build_six_faces(slitcorners[0:4], slitcorners[4:])
+
+    def SlitCalculate(self):
+        '''
+        计算是否遮挡, 同时计算与探测器平面夹角 \\
+        探测器平面与狭缝平行
+        '''
+        p, q = self.hc.loda_point(obj, det, self.rs_slit)
 
 
-
+    def SVCalculate(self, obj, det):
+        p, q = self.hc.loda_point(obj, det, self.rs_obj)
+        _, _, valid = self.hc.through_slit(p, q, self.ns_slit)
+        I, J = np.nonzero()
 
 
 if __name__ == "__main__":
