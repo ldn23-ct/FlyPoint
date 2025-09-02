@@ -194,6 +194,20 @@ class HalfSpaceCutting:
 
         return t0, t1, valid
 
+class ScatterVec():
+    '''
+    在半裁剪算法的基础上, 计算出射衰减, 以及是否穿过狭缝
+    input:
+      objcorners--模体角点, 需要计算射线路径, ndarray of shape: [8, 3]
+      slitcorners--狭缝角点, 需要计算是否穿过狭缝, ndarray of shape: [8, 3]
+    output:
+      
+    '''
+
+
+
+
+
 if __name__ == "__main__":
     A4 = [[-1, 1, -1], [-1, -1, -1], [1, -1, -1], [1, 1, -1]]
     B4 = [[-1, 1, 1], [-1, -1, 1], [1, -1, 1], [1, 1, 1]]
