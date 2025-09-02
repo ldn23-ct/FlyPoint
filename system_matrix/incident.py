@@ -3,16 +3,32 @@ import math
 import matplotlib.pyplot as plt
 import os
 
-def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ray_angle=15*np.pi/180,n_voxels_shape=[6,20,90],attenuation = 0.68):
-    
-    [nray,ny,nz] = n_voxels_shape
+def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ray_angle=15,ray_size=1,voxels_size=1,attenuation = 0.68):
+    '''
+    计算入射向量矩阵(每个元素的值代表对应角度，对应体素处的入射向量，向量方向为射线方向，大小为入射强度)
+    并返回入射向量矩阵,shape(nray,ny,nz,3)
+    distance_of_source2object: 源到物体前表面的距离
+    object_size: 物体的实际尺寸(x=y,z) 单位mm
+    ray_angle: 射线角度范围的一半(偏离垂直入射的最大角度) 单位°
+    ray_size: 射线角度步长 单位°
+    voxels_size: 体素的大小 单位mm
+    attenuation: 衰减系数
+    '''
+
+    nray = math.floor(ray_angle / ray_size) + 1
+    ny = math.floor(object_size[1] / voxels_size) + 1
+    nz = math.floor(object_size[0] / voxels_size) + 1
     ny = math.floor(ny * 0.5) + 1
     obj_y,obj_z = object_size
     vector = np.zeros((nray,ny,nz,3))
 
-    rays = np.linspace(0,ray_angle,nray)
-    voxel_size_y = obj_y / ny
-    voxel_size_z = obj_z / nz
+    rays = np.linspace(0,ray_angle*np.pi/180,nray)
+
+    # voxel_size_y = obj_y / ny;
+    # voxel_size_z = obj_z / nz;
+
+    voxel_size_y = voxels_size;
+    voxel_size_z = voxels_size;
     grid_origin =np.array([distance_of_source2object, - 0.5 * voxel_size_y,0])
     for p in range(nray):
         ray_vec = np.array([np.cos(rays[p]),np.sin(rays[p]),0])
@@ -99,4 +115,31 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ra
         
     return vector_full
 
+def  voxel_center_calulate(distance_of_source2object=40,object_size=[20,90],voxels_size=1):
+    '''
+    计算体素中心坐标并返回体素中心矩阵,shape(ny,nz,3)
+    distance_of_source2object: 源到物体前表面的距离
+    object_size: 物体的实际尺寸(x=y,z) 单位mm
+    voxels_size: 体素的大小 单位mm
+    '''
+    ny = math.floor(object_size[1] / voxels_size) + 1
+    nz = math.floor(object_size[0] / voxels_size) + 1   
+    ny = math.floor(ny * 0.5) + 1
+    voxel_center = np.zeros((ny,nz,3))
+
+    for i in range(ny):
+        for j in range(nz):
+            voxel_center[i,j,:] = np.array([distance_of_source2object + i * voxels_size, j * voxels_size,0])       
+    # 去掉 y=0 的第一行
+    voxel_center_pos = voxel_center[:, 1:, :]     # shape (ny-1, nz, 3)
+
+    # 沿 y 维度翻转
+    voxel_center_mirror = np.flip(voxel_center_pos, axis=0)  # 翻转 y 方向
+
+    # y 分量取负（索引2对应xyz中的y分量）
+    voxel_center_mirror[:, :, 1] *= -1
+
+    # 拼接：先镜像部分(y<0)，再原部分(y>=0)
+    voxel_center_full = np.concatenate([voxel_center_mirror, voxel_center], axis=0)
+    return voxel_center_full
 
