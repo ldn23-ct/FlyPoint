@@ -206,23 +206,34 @@ class ScatterVec:
       ScatterVector--散射射线向量, 被遮挡记作nan, 否则方向表示向量, 模长表示衰减, ndarray of shape: [a*b, c*c] \\
       Angle--与探测器夹角余弦值, 用于计算kn项
     '''
-    def __init__(self, objcorners, slitcorners):
+    def __init__(self, objcorners, slitcorners, dDet):
         self.hc = HalfSpaceCutting()
         self.ns_obj, self.rs_obj = self.hc.build_six_faces(objcorners[0:4], objcorners[4:])
         self.ns_slit, self.rs_slit = self.hc.build_six_faces(slitcorners[0:4], slitcorners[4:])
+        self.dA = dDet
 
     def SlitCalculate(self):
         '''
-        计算是否遮挡, 同时计算与探测器平面夹角 \\
+        计算是否遮挡, 同时计算探测器面元对体素点的立体角 \\
         探测器平面与狭缝平行
         '''
         p, q = self.hc.loda_point(obj, det, self.rs_slit)
+        _, _, valid = self.hc.through_slit(p, q, self.ns_slit)
+        I, _ = np.nonzero(valid)
+        p_valid = p[I]
+        temp = p_valid - np.dot(p_valid, self.ns_slit[0])*self.ns_slit[0]
+        cos_phi = np.linalg.norm(temp) / np.linalg.norm(p_valid)
+        solid_angle = self.dA * cos_phi / (np.linalg.norm(p_valid))**2
+        return cos_phi, I
 
 
     def SVCalculate(self, obj, det):
         p, q = self.hc.loda_point(obj, det, self.rs_obj)
-        _, _, valid = self.hc.through_slit(p, q, self.ns_slit)
-        I, J = np.nonzero()
+        _, valididx = self.SlitCalculate()
+        t0, t1, _ = self.hc.through_slit(p, q, self.ns_obj)
+        pathLength = p[valididx] * (t1[valididx] - t0[valididx])
+        return pathLength
+
 
 
 if __name__ == "__main__":
