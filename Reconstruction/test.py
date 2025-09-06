@@ -212,54 +212,44 @@ class ScatterVec:
         self.ns_slit, self.rs_slit = self.hc.build_six_faces(slitcorners[0:4], slitcorners[4:])
         self.dA = dDet
 
-    def SlitCalculate(self):
+    def SlitCalculate(self, obj, det):
         '''
         计算是否遮挡, 同时计算探测器面元对体素点的立体角 \\
         探测器平面与狭缝平行
         '''
         p, q = self.hc.loda_point(obj, det, self.rs_slit)
         _, _, valid = self.hc.through_slit(p, q, self.ns_slit)
-        I, _ = np.nonzero(valid)
-        p_valid = p[I]
+        p_valid = p[valid]
         temp = p_valid - np.dot(p_valid, self.ns_slit[0])*self.ns_slit[0]
         cos_phi = np.linalg.norm(temp) / np.linalg.norm(p_valid)
         solid_angle = self.dA * cos_phi / (np.linalg.norm(p_valid))**2
-        return cos_phi, I
+        return cos_phi, valid
 
 
     def SVCalculate(self, obj, det):
         p, q = self.hc.loda_point(obj, det, self.rs_obj)
-        _, valididx = self.SlitCalculate()
-        t0, t1, _ = self.hc.through_slit(p, q, self.ns_obj)
+        cos_phi, valididx = self.SlitCalculate(obj, det)
+        print(np.rad2deg(np.arccos(cos_phi)))
+        t0, t1, _ = self.hc.through_slit(p, q, self.ns_obj, require_enter=False)
         pathLength = p[valididx] * (t1[valididx] - t0[valididx])
         return pathLength
 
 
 
 if __name__ == "__main__":
-    A4 = [[-1, 1, -1], [-1, -1, -1], [1, -1, -1], [1, 1, -1]]
-    B4 = [[-1, 1, 1], [-1, -1, 1], [1, -1, 1], [1, 1, 1]]
-    func = HalfSpaceCutting()
-    ns, rs = func.build_six_faces(np.array(A4), np.array(B4))
-    print(ns)
-    print(rs)
-    
-    # x1, x2 = np.arange(-3, 4, 3), np.arange(-3, 4)
-    # y1, y2 = np.arange(-3, 4, 3), np.arange(-3, 4)
-    # X1, Y1 = np.meshgrid(x1, y1)
-    # X2, Y2 = np.meshgrid(x2, y2)
-    # Z1, Z2 = -5*np.ones(X1.shape), 5*np.ones(X2.shape)
-    # obj = np.column_stack((X1.ravel(), Y1.ravel(), Z1.ravel())).astype(np.float64, copy=False)
-    # det = np.column_stack((X2.ravel(), Y2.ravel(), Z2.ravel())).astype(np.float64, copy=False)
+    slitcorners = np.array([[56.31, 25, 66.32], [56.31, -25, 66.32], [55.54, -25, 66.97], [55.54, 25, 66.97],
+                       [60.16, 25, 70.92], [60.16, -25, 70.92], [59.4, -25, 71.56], [59.4, 25, 71.56]])
+    objcorners = np.array([[-100, 100, 45], [-100, -100, 45], [100, -100, 45], [100, 100, 45],
+                    [-100, 100, -45], [-100, -100, -45], [100, -100, -45], [100, 100, -45]])
 
-    obj = np.array([[-3, -3, -5]])
-    det = np.array([[3, 2, 5]])
+    obj = np.array([[0.012, -19, 3.93], [0, 0, -40]])
+    det = np.array([[118, 10.5, 135.96], [0, 0, 0]])
 
-    p, q = func.loda_point(obj, det, rs)
-    t0, t1, valid = func.through_slit(p, q, ns)
-    # print(obj[4, :])
-    print(valid.reshape(p.shape[0], p.shape[1]))
-    # print(t0[0].reshape(x2.shape[0], y2.shape[0]))
-    # print(t1[0].reshape(x2.shape[0], y2.shape[0]))
-    # print(valid[0].reshape(x2.shape[0], y2.shape[0]))
+    #pathLength=55.84  angle=80.38degree
 
+    scatterVec = ScatterVec(objcorners, slitcorners, 1)
+    cos_phi, valid = scatterVec.SlitCalculate(obj, det)
+    pathlenth = scatterVec.SVCalculate(obj, det)
+    # print(cos_phi, np.cos(np.deg2rad(80.38)))
+    # print(valid)
+    print(np.linalg.norm(pathlenth))
