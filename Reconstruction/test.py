@@ -234,6 +234,16 @@ class ScatterVec:
         pathLength = p[valididx] * (t1[valididx] - t0[valididx])
         return pathLength
 
+    def Compress(self, mat, mask):
+        '''
+        矩阵存储为稀疏格式，只记录有效值及其坐标 \\
+        input:\\
+          mat: [p, m, n] or [m, n]
+          mask: [m, n]
+        output:\\
+          
+        '''
+
 
 
 if __name__ == "__main__":
