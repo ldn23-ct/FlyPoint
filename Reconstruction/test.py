@@ -3,19 +3,19 @@ import numpy as np
 def Mapping(pos: np.ndarray, objsize: np.ndarray, voxelsize: np.ndarray, kernelsize: np.ndarray):
     '''
     input
-      pos--模体前表面左上角点坐标 初始时刻对准零点 ndarray of shape (2,) dtype=float
-      objsize--物体尺寸 ndarray of shape (3,)
-      voxelsize--空间体素大小 根据空间坐标计算体素编号
-      kernel_y/kernel_z--二维卷积核尺寸 大小与体素大小相同 计算会极大简化
+        pos--模体前表面左上角点坐标 初始时刻对准零点 ndarray of shape (2,) dtype=float
+        objsize--物体尺寸 ndarray of shape (3,)
+        voxelsize--空间体素大小 根据空间坐标计算体素编号
+        kernel_y/kernel_z--二维卷积核尺寸 大小与体素大小相同 计算会极大简化
     output
-      n_grid--二维卷积核每个像素与三维空间体素的对应关系 shape (ky, kz)
+        n_grid--二维卷积核每个像素与三维空间体素的对应关系 shape (ky, kz)
     idea
-      (1) 空间体素划分编号 n = iz + iy * nz + ix * (ny * nz)
-      (2) 零点按模体中心来计算
-      (3) 假设零点是对准的 kernel相当于三维矩阵的一个切片 只需要根据 pos_y 就可以求出 iy0
-          并顺便取出每一行对应的 iy 
-      (4) 当 pos_x 位于交界线上 归 x+ 像素
-      (5) 越界 n_grid赋值-1
+        (1) 空间体素划分编号 n = iz + iy * nz + ix * (ny * nz)
+        (2) 零点按模体中心来计算
+        (3) 假设零点是对准的 kernel相当于三维矩阵的一个切片 只需要根据 pos_y 就可以求出 iy0
+            并顺便取出每一行对应的 iy 
+        (4) 当 pos_x 位于交界线上 归 x+ 像素
+        (5) 越界 n_grid赋值-1
     '''
     x, y = pos[0], pos[1]
     Lx, Ly, Lz = objsize[0], objsize[1], objsize[2]
@@ -43,14 +43,14 @@ def Mapping(pos: np.ndarray, objsize: np.ndarray, voxelsize: np.ndarray, kernels
 def DetArray(corners: list, pixelsize: list, detsize: list):
     '''
     input
-      corner_pos--4 corners position of the detector
-      dx/dy--length of the detector pixel
-      x/y--length of the detector
+        corner_pos--4 corners position of the detector
+        dx/dy--length of the detector pixel
+        x/y--length of the detector
     output
-      detarray--pos of the pixels' center shape:[ny, nx]
+        detarray--pos of the pixels' center shape:[ny, nx]
     idea
-      (1) 计算像素个数
-      (2) 计算每个像素中心点
+        (1) 计算像素个数
+        (2) 计算每个像素中心点
     '''
     nx, ny = int(detsize[0] / pixelsize[0]), int(detsize[1] / pixelsize[1])
     P0, P1, P2, P3 = map(np.array, corners)
@@ -88,11 +88,11 @@ class HalfSpaceCutting:
     def plane_normal(self, verts: np.ndarray, centroid: np.ndarray):
         '''
         input
-          verts: 有序顶点集合，按逆时针排序 shape:[4, 3], 左上角开始
-          centroid: 六面体几何中心 shape:[3,]
+            verts: 有序顶点集合，按逆时针排序 shape:[4, 3], 左上角开始
+            centroid: 六面体几何中心 shape:[3,]
         output
-          normal: 向外归一化法向量 shape:[3,]
-          m: 面中心点 shape:[3,]
+            normal: 向外归一化法向量 shape:[3,]
+            m: 面中心点 shape:[3,]
         '''
         v0, v1, v2 = verts[0], verts[1], verts[2]
         n = np.cross(v1 - v0, v2 - v0)
@@ -108,12 +108,12 @@ class HalfSpaceCutting:
     def loda_point(self, obj_array, det_array, r_array):
         '''
         input
-          obj_array--shape:[a*b, 3]
-          det_array--shape:[c*c, 3]
-          r_array--shape:[6, 3]
+            obj_array--shape:[a*b, 3]
+            det_array--shape:[c*c, 3]
+            r_array--shape:[6, 3]
         output
-          p--(det_array - obj_array) shape:[a*b, c*c, 3]
-          q--(obj_array - m) shape:[6, a*b, 3]
+            p--(det_array - obj_array) shape:[a*b, c*c, 3]
+            q--(obj_array - m) shape:[6, a*b, 3]
         '''
         p = det_array[None, :, :] - obj_array[:, None, :]
         q = obj_array[None, :, :] - r_array[:, None, :]
@@ -122,10 +122,10 @@ class HalfSpaceCutting:
     def build_six_faces(self, entrance, exit):
         '''
         input
-          entrance--shape:[4, 3]
-          exit--shape:[4, 3]
+            entrance--shape:[4, 3]
+            exit--shape:[4, 3]
         output
-          faces--[dics{name, verts, n, r}]
+            faces--[dics{name, verts, n, r}]
         '''
         corners = np.vstack((entrance, exit))
         centroid = np.mean(corners, axis=0)
@@ -143,68 +143,99 @@ class HalfSpaceCutting:
             rs.append(rk)
         return np.array(ns), np.array(rs)
     
-    def through_slit(self, p, q, ns, require_enter=True, eps_base=1e-9):
+    def through_slit(self, p: np.ndarray, q: np.ndarray, ns: np.ndarray, require_enter=True, eps_base=1e-9, enter_plane=0, exit_plane=1):
         '''
         input
-          p--(det_array - obj_array) shape:[a*b, c*c, 3]
-          q--(obj_array - r) shape:[6, a*b, 3]
-          ns--shape:[6, 3]
+            p--(det_array - obj_array) shape:[a*b, c*c, 3]
+            q--(obj_array - r) shape:[6, a*b, 3]
+            ns--shape:[6, 3]
         output
-          t0--enter point, shape:[a*b, c*c]
-          t1--exit point, shape:[a*b, c*c]
-          valid--through_slit_ray, shape:[a*b, c*c]
+            csm: {'m_idx','n_idx','vec','ptr'}
         idea
-          线段穿过狭缝的判据
-          1. 不存在外侧平行面
-          2. 进入面最大值与离开面最小值分别在A/B取得
-          3. 进入面最大值要小于离开面最小值        
+            线段穿过狭缝的判据
+            1. 不存在外侧平行面
+            2. 进入面最大值与离开面最小值分别在A/B取得
+            3. 进入面最大值要小于离开面最小值        
         '''
+        m, n, _ = p.shape
+        assert q.shape == (6, m, 3)
+        
         scale = max(1.0,
                     float(np.max(np.linalg.norm(p.reshape(-1,3), axis=1))) if p.size else 1.0,
                     float(np.max(np.linalg.norm(q.reshape(-1,3), axis=1))) if q.size else 1.0,
                     float(np.max(np.linalg.norm(ns, axis=1))) if ns.size else 1.0)
         eps = eps_base * scale
-        ps = -np.einsum('ij,drj->idr', ns, p)  # [6, a*b, c*c]
-        qs = np.einsum('ij,idj->id', ns, q)[:, :, None]  # [6, a*b, 1]
-        ts = qs / ps  # [6, a*b, c*c]
-
-        enter_mask = ps > eps  # [6, a*b, c*c]
-        exit_mask = ps < -eps  # [6, a*b, c*c]
-        outside_para_mask = (~(enter_mask | exit_mask)) & (qs > eps)
-        outside_para_mask = np.any(outside_para_mask, axis=0)  # [a*b, c*c]
-
-        neg_inf, pos_inf = -np.inf, np.inf
-        t_enter = np.where(enter_mask, ts, neg_inf)  # [6, a*b, c*c]
-        tE = np.max(t_enter, axis=0)  # [a*b, c*c]
-        enter_idx = np.argmax(t_enter, axis=0)
-        # print(enter_idx[0].reshape(7, 7))
         
-        t_leave = np.where(exit_mask, ts, pos_inf)  # [6, a*b, c*c]
-        tL = np.min(t_leave, axis=0)  # [a*b, c*c]
-        exit_idx = np.argmin(t_leave, axis=0)
-        # print(exit_idx[0].reshape(7, 7))
-
+        tE = np.full((m, n), -np.inf, dtype=p.dtype)
+        tL = np.full((m, n), np.inf, dtype=p.dtype)
+        enter_idx = np.full((m, n), -1, dtype=np.int32)
+        exit_idx = np.full((m, n), -1, dtype=np.int32)
+        outside_para_mask = np.zeros((m, n), dtype=bool)
+        
+        for k in range(ns.shape[0]):
+            n_k, qs_k = ns[k], q[k, ...]
+            ps = - (p @ n_k)    # [m, n]
+            qs = (qs_k @ n_k) [:, None]     # [m, 1]
+            
+            enter_mask = ps > eps
+            exit_mask = ps < -eps
+            para = np.abs(ps) <= eps
+            outside_para_mask |= para & (qs > eps)
+            
+            t = np.zeros_like(ps)
+            np.divide(qs, ps, out=t, where=~para)
+            
+            better_enter_mask = enter_mask & (t > tE)
+            if np.any(better_enter_mask):
+                tE[better_enter_mask] = t[better_enter_mask]
+                enter_idx[better_enter_mask] = k
+            
+            better_exit_mask = exit_mask & (t < tL)
+            if np.any(better_exit_mask):
+                tL[better_exit_mask] = t[better_exit_mask]
+                exit_idx[better_exit_mask] = k
+        
         t0 = np.maximum(tE, 0)
         t1 = np.minimum(tL, 1)
 
-        valid = (~outside_para_mask) & (tE < tL + eps) & (t0 < t1 + eps)
-        # print(valid[0].reshape(7, 7))
-        if require_enter:
-          valid = valid & (enter_idx == 0) & (exit_idx == 1)
+        valid = (~outside_para_mask) & (tE <= tL + eps) & (t0 <= t1 + eps)
 
-        return t0, t1, valid
+        if require_enter:
+            valid = valid & (enter_idx == enter_plane) & (exit_idx == exit_plane)
+        
+        m_idx, n_idx = np.nonzero(valid)
+        order = np.argsort(m_idx, kind='stable')
+        m_idx = m_idx[order]; n_idx = n_idx[order]
+        v = p[m_idx, n_idx, :].astype(np.float64, copy=False)
+        v = v / np.linalg.norm(v, axis=1)     
+        m_unique, counts = np.unique(m_idx, return_counts=True)
+        
+        m_cnts = np.zeros(m); ptr = np.zeros(m+1); sum = 0
+        for k in range(m_unique.shape[0]):
+            m_cnts[m_unique[k]] = counts[k]
+        for k in range(1, m+1):
+            sum += m_cnts[k-1]
+            ptr[k] = sum
+        
+        # return v.astype(np.float32, copy=False), ptr, n_idx.astype(np.int32, copy=False)
+        return {
+            "m_ptr": ptr,
+            "data": v.astype(np.float32, copy=False),
+            "idx": n_idx.astype(np.int32, copy=False),
+            "shape": (m, n)
+        }
 
 class ScatterVec:
     '''
     在半裁剪算法的基础上, 计算出射衰减, 以及是否穿过狭缝 \\
     input: \\
-      objcorners--模体角点, 需要计算射线路径, ndarray of shape: [8, 3] \\
-      slitcorners--狭缝角点, 需要计算是否穿过狭缝, ndarray of shape: [8, 3] \\
-      obj--模体采样点, ndarray of shape: [m, 3] \\
-      det--探测器采样点, ndarray of shape: [n, 3] \\
+        objcorners--模体角点, 需要计算射线路径, ndarray of shape: [8, 3] \\
+        slitcorners--狭缝角点, 需要计算是否穿过狭缝, ndarray of shape: [8, 3] \\
+        obj--模体采样点, ndarray of shape: [m, 3] \\
+        det--探测器采样点, ndarray of shape: [n, 3] \\
     output: \\
-      ScatterVector--散射射线向量, 被遮挡记作nan, 否则方向表示向量, 模长表示衰减, ndarray of shape: [a*b, c*c] \\
-      Angle--与探测器夹角余弦值, 用于计算kn项
+        ScatterVector--散射射线向量, 被遮挡记作nan, 否则方向表示向量, 模长表示衰减, ndarray of shape: [a*b, c*c] \\
+        Angle--与探测器夹角余弦值, 用于计算kn项
     '''
     def __init__(self, objcorners, slitcorners, dDet):
         self.hc = HalfSpaceCutting()
@@ -214,11 +245,12 @@ class ScatterVec:
 
     def SlitCalculate(self, obj, det):
         '''
-        计算是否遮挡, 同时计算探测器面元对体素点的立体角 \\
+        计算是否遮挡, 返回未被遮挡的空间点坐标  \\
+        计算探测器面元对体素点的立体角 \\
         探测器平面与狭缝平行
         '''
         p, q = self.hc.loda_point(obj, det, self.rs_slit)
-        _, _, valid = self.hc.through_slit(p, q, self.ns_slit)
+        _, valid = self.hc.through_slit(p, q, self.ns_slit)
         p_valid = p[valid]
         temp = p_valid - np.dot(p_valid, self.ns_slit[0])*self.ns_slit[0]
         cos_phi = np.linalg.norm(temp) / np.linalg.norm(p_valid)
@@ -230,19 +262,35 @@ class ScatterVec:
         p, q = self.hc.loda_point(obj, det, self.rs_obj)
         cos_phi, valididx = self.SlitCalculate(obj, det)
         print(np.rad2deg(np.arccos(cos_phi)))
-        t0, t1, _ = self.hc.through_slit(p, q, self.ns_obj, require_enter=False)
-        pathLength = p[valididx] * (t1[valididx] - t0[valididx])
+        dt, _ = self.hc.through_slit(p, q, self.ns_obj, require_enter=False)
+        pathLength = p[valididx] * (dt[valididx])
         return pathLength
 
-    def Compress(self, mat, mask):
+    def Compress(self, A_csm: dict, B_csm: dict):
+        '''  
+        idea
+            先根据ptr找出A、B中共有的非空元素，再进行计算
         '''
-        矩阵存储为稀疏格式，只记录有效值及其坐标 \\
-        input:\\
-          mat: [p, m, n] or [m, n]
-          mask: [m, n]
-        output:\\
-          
-        '''
+        A_ptr = A_csm["m_ptr"]; A_data = A_csm["data"]; A_idx = A_csm["idx"]; A_shape = A_csm["shape"]
+        B_ptr = B_csm["m_ptr"]; B_data = B_csm["data"]; B_idx = B_csm["idx"]; B_shape = B_csm["shape"]
+        
+        M = A_shape[1]
+        assert B_shape[0] == M
+        
+        for m in range(M):
+            a0, a1 = A_ptr[m], A_ptr[m+1]
+            b0, b1 = B_ptr[m], B_ptr[m+1]
+            if a0 == a1 or b0 == b1: continue
+            
+            p_sub = A_idx[a0:a1]
+            U = A_data[a0:a1, :].astype(np.float64, copy=False)
+            n_sub = B_idx[b0:b1]
+            V = B_data[b0:b1, :].astype(np.float64, copy=False)
+            
+            cos_theta = U @ V.T
+            np.clip(cos_theta, -1.0, 1.0, out=cos_theta)
+            
+
 
 
 
