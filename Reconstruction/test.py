@@ -290,7 +290,48 @@ class ScatterVec:
             cos_theta = U @ V.T
             np.clip(cos_theta, -1.0, 1.0, out=cos_theta)
             
+    def klein_nishina_dsigma_dOmega(E, mu, unit="keV"):
+        """
+        Klein–Nishina 微分散射截面（未极化、对自旋取平均）
+        输入:
+            E   : 入射光子能量（标量或 ndarray）
+            mu  : 散射角余弦 cos(theta)（标量或 ndarray，与 E 可广播）
+            unit: "keV" 或 "MeV"（默认 "keV"）
+        输出:
+            dsdo: 微分截面 dσ/dΩ，单位 cm^2/sr（ndarray 或标量）
+        公式:
+            E'/E = 1 / ( 1 + (E/mec2)*(1 - mu) )
+            dσ/dΩ = (re^2/2) * (E'/E)^2 * ( E'/E + E/E' - sin^2θ )
+                = (re^2/2) * (κ^2) * ( κ + 1/κ - (1 - mu^2) ), 其中 κ = E'/E
+        """
+        E = np.asarray(E, dtype=np.float64)
+        mu = np.asarray(mu, dtype=np.float64)
 
+        # 常数（以 cm、keV 为基准）
+        re_cm = 2.8179403262e-13        # 经典电子半径 [cm]
+        mec2_keV = 511.0                # 电子静能 [keV]
+
+        # 单位处理
+        if unit.lower() == "kev":
+            E_keV = E
+        elif unit.lower() == "mev":
+            E_keV = E * 1e3
+        else:
+            raise ValueError("unit 必须为 'keV' 或 'MeV'")
+
+        # 数值安全：将 mu 限制在 [-1, 1]
+        mu = np.clip(mu, -1.0, 1.0)
+
+        # 计算 E'/E
+        k = 1.0 / (1.0 + (E_keV / mec2_keV) * (1.0 - mu))   # κ = E'/E
+        invk = 1.0 / k
+
+        # sin^2 θ = 1 - mu^2
+        sin2 = 1.0 - mu**2
+
+        # Klein–Nishina 微分截面 [cm^2/sr]
+        dsdo = 0.5 * (re_cm**2) * (k**2) * (k + invk - sin2)
+        return dsdo
 
 
 
