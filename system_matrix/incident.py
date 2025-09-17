@@ -146,15 +146,21 @@ def voxel_center_calulate(distance_of_source2object=40,object_size=[20,90],voxel
     voxel_center_full = np.concatenate([voxel_center_mirror, voxel_center], axis=0)
     return voxel_center_full
 
-def voxel_path_length_cal(grid_origin,grid_size,nx,ny,nz,ray_vec,ray_origin,attenuation = 0.68):
+def voxel_path_length_cal(grid_origin,grid_size,nx,ny,nz,ray_vec,ray_origin,attenuation = 0.68, output_type = "single"):
     '''
     计算体素路径长度
+    input:
     grid_origin: 体素网格的原点坐标 [z,y,x]
     grid_size: 体素的大小
     nx,ny,nz: 体素网格在x,y,z方向的数量
     ray_vec: 入射向量组,shape(num,3) 模为射线强度 vec = [z,y,x]
     ray_origin: 入射向量起始点数组,输入为网格序号,shape(num,3) vec = [z,y,x]
     attenuation: 衰减系数
+    output_type: 输出类型 "single" or "total"
+        "single": 输出每个入射射线与体素的交点坐标和对应的出射向量
+        "total": 输出每个入射射线对应的总出射向量
+    output:
+
     '''
     # ptr_in = m_ptr
     # data_in = data
@@ -174,6 +180,7 @@ def voxel_path_length_cal(grid_origin,grid_size,nx,ny,nz,ray_vec,ray_origin,atte
     num = np.shape(ray_vec)[0]
     # 用list动态存储
     vec_out = []
+    vec_out_total = []
     nums, zs, ys, xs = [], [], [], []
 
     for num_i in range(num):
@@ -331,17 +338,23 @@ def voxel_path_length_cal(grid_origin,grid_size,nx,ny,nz,ray_vec,ray_origin,atte
                 a_x = a_x + axu
             if i >= nz or i < 0 or j >= ny or j < 0 or k >= nx or k < 0:
                 break
-
+        vec_out_total.append(i12 * vec / d12 / d12)
 
     print("total voxels:",len(xs))
-    return {
-            # "m_ptr": ptr_out,
-            # "data": data_out.astype(np.float32, copy=False),
-            # "idx": n_idx_out.astype(np.int32, copy=False),
-            # "shape": shape_out
+    if output_type == "single":
+        return {
+                # "m_ptr": ptr_out,
+                # "data": data_out.astype(np.float32, copy=False),
+                # "idx": n_idx_out.astype(np.int32, copy=False),
+                # "shape": shape_out
             "num": np.array(nums).astype(np.int32, copy=False),
             "z": np.array(zs).astype(np.int32, copy=False),
             "x": np.array(xs).astype(np.int32, copy=False),
             "y": np.array(ys).astype(np.int32, copy=False),
             "vec": np.array(vec_out).astype(np.float32, copy=False)
+        }
+    elif output_type == "total":
+
+        return {
+                "vec": np.array(vec_out_total).astype(np.float32, copy=False)
         }
