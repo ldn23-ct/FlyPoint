@@ -18,20 +18,17 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ra
 
     '''
     需要修改：
-    1. voxel_size  shape[3,]
+    1. voxel 下标
+    2. input ny, nz
+    3. output
+       m_ptr
+       p_idx
+       vec  norm  方向
+       data  光通量
+    p, m = np.nonzero(matrix)
+    order = np.argsort(m)
+    p = p[order]  [0:3]--0  [3:5]--1
     
-    2. 传入 obj_size 以及 voxel_size
-    ny = 2 * np.ceil(obj_size[0] / 2 / voxel_size[1])   ?
-    nz = np.ceil(obj_size[1] / voxel_size[2])
-    
-    3. 输出格式
-    {
-        m_ptr
-        p_idx
-        data
-        vec
-        shape
-    }
     '''
 
     nray = math.floor(ray_angle / ray_size) + 1
@@ -133,6 +130,7 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ra
     # 拼接：先镜像部分(y<0)，再原部分(y>=0)
     vector_full = np.concatenate([vector_mirror, vector], axis=1)
 
+
         
     return vector_full
 
@@ -170,9 +168,9 @@ def voxel_path_length_cal(grid_origin,grid_size,nx,ny,nz,ray_vec,ray_origin,atte
     input:
     grid_origin: 体素网格的原点坐标 [z,y,x]
     grid_size: 体素的大小
-    nx,ny,nz: 体素网格在x,y,z方向的数量
-    ray_vec: 入射向量组,shape(num,3) 模为射线强度 vec = [z,y,x]
-    ray_origin: 入射向量起始点数组,输入为网格序号,shape(num,3) vec = [z,y,x]
+    obj_size
+    start
+    end
     attenuation: 衰减系数
     output_type: 输出类型 "single" or "total"
         "single": 输出每个入射射线与体素的交点坐标和对应的出射向量
