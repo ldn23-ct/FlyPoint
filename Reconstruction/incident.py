@@ -16,6 +16,24 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ra
     attenuation: 衰减系数
     '''
 
+    '''
+    需要修改：
+    1. voxel_size  shape[3,]
+    
+    2. 传入 obj_size 以及 voxel_size
+    ny = 2 * np.ceil(obj_size[0] / 2 / voxel_size[1])   ?
+    nz = np.ceil(obj_size[1] / voxel_size[2])
+    
+    3. 输出格式
+    {
+        m_ptr
+        p_idx
+        data
+        vec
+        shape
+    }
+    '''
+
     nray = math.floor(ray_angle / ray_size) + 1
     ny = math.floor(object_size[1] / voxels_size) + 1
     nz = math.floor(object_size[0] / voxels_size) + 1

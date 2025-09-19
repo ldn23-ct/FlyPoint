@@ -1,4 +1,5 @@
 import numpy as np
+import incident as Inc
 
 def Mapping(pos: np.ndarray, objsize: np.ndarray, voxelsize: np.ndarray, kernelsize: np.ndarray):
     '''
@@ -61,20 +62,13 @@ def DetArray(corners: list, pixelsize: list, detsize: list):
         v_top_end   = P1 + (P2 - P1) * i / ny
         v_bot_start = P0 + (P3 - P0) * (i + 1) / ny
         v_bot_end   = P1 + (P2 - P1) * (i + 1) / ny
-
         for j in range(nx):
             # Compute 4 corners of the sub-rectangle
             tl = v_top_start + (v_top_end - v_top_start) * j / nx        # top-left
-            # tr = v_top_start + (v_top_end - v_top_start) * (j + 1) / nx  # top-right
             br = v_bot_start + (v_bot_end - v_bot_start) * (j + 1) / nx  # bottom-right
-            # bl = v_bot_start + (v_bot_end - v_bot_start) * j / nx        # bottom-left
-
             center = (tl + br) / 2  # diagonal midpoint
             centers.append(center)
-
-    centers = np.array(centers).reshape(ny, nx)
-
-    return centers
+    return np.array(centers)
 
 class HalfSpaceCutting:
     '''
@@ -220,8 +214,9 @@ class HalfSpaceCutting:
         # return v.astype(np.float32, copy=False), ptr, n_idx.astype(np.int32, copy=False)
         return {
             "m_ptr": ptr,
-            "data": v.astype(np.float32, copy=False),
-            "idx": n_idx.astype(np.int32, copy=False),
+            "vec": v.astype(np.float32, copy=False),
+            "m_idx": m_idx.astype(np.int32, copy=False),
+            "n_idx": n_idx.astype(np.int32, copy=False),
             "shape": (m, n)
         }
 
@@ -237,9 +232,8 @@ class ScatterVec:
         ScatterVector--散射射线向量, 被遮挡记作nan, 否则方向表示向量, 模长表示衰减, ndarray of shape: [a*b, c*c] \\
         Angle--与探测器夹角余弦值, 用于计算kn项
     '''
-    def __init__(self, objcorners, slitcorners, dDet):
+    def __init__(self, slitcorners, dDet):
         self.hc = HalfSpaceCutting()
-        self.ns_obj, self.rs_obj = self.hc.build_six_faces(objcorners[0:4], objcorners[4:])
         self.ns_slit, self.rs_slit = self.hc.build_six_faces(slitcorners[0:4], slitcorners[4:])
         self.dA = dDet
 
@@ -256,15 +250,6 @@ class ScatterVec:
         cos_phi = np.linalg.norm(temp) / np.linalg.norm(p_valid)
         solid_angle = self.dA * cos_phi / (np.linalg.norm(p_valid))**2
         return cos_phi, valid
-
-
-    def SVCalculate(self, obj, det):
-        p, q = self.hc.loda_point(obj, det, self.rs_obj)
-        cos_phi, valididx = self.SlitCalculate(obj, det)
-        print(np.rad2deg(np.arccos(cos_phi)))
-        dt, _ = self.hc.through_slit(p, q, self.ns_obj, require_enter=False)
-        pathLength = p[valididx] * (dt[valididx])
-        return pathLength
 
     def Compress(self, A_csm: dict, B_csm: dict):
         '''  
@@ -333,22 +318,100 @@ class ScatterVec:
         dsdo = 0.5 * (re_cm**2) * (k**2) * (k + invk - sin2)
         return dsdo
 
+class ReConstruction:
+    '''
+    '''
+    def __init__(self,
+                 src_pos: np.ndarray,  #shape: [3,]
+                 grid_origin: np.ndarray,  #shape: [3,]
+                 obj_size: np.ndarray,  #shape: [3,]
+                 voxelsize: np.ndarray,  #shape: [3,]
+                 det_corners: np.ndarray,  #shape: [4, 3]  points in order
+                 det_size: np.ndarray,  #shape: [2,]
+                 pixel_size: np.ndarray,  #shape: [2,]
+                 fan_angle: np.float32,
+                 slit_corners: list  # shape: [8, 3]
+                 ):
+        self.src = src_pos
+        self.obj_origin = grid_origin
+        self.objsize = obj_size
+        self.voxelsize = voxelsize
+        self.detsize = det_size
+        self.pixelsize = pixel_size
+        self.det = DetArray(det_corners, self.pixelsize, self.detsize)  # 按行排序，右下角为起点
+        self.fan = np.deg2rad(fan_angle)
+        self.slit = slit_corners
+    
+    def Emit(self):
+        SOD = self.obj_origin[2] - self.src[2]
+        slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
+        ny = 2 * np.ceil(slice_halfy / self.voxelsize[1])
+        nz = np.ceil(self.objsize[2] / self.voxelsize[2])
+        obj_slice = [ny * self.voxelsize[1], self.objsize[2]]
+        #------------------ slice sample ------------------#
+        y_start = (obj_slice[0] - self.voxelsize[1]) / 2
+        z_start = SOD + self.voxelsize[2] / 2
+        y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
+        z_centers = [(z_start + i * self.voxelsize[2]) for i in range(nz)]
+        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+        X = np.zeros_like(Y)
+        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        #------------------ slice sample ------------------#
+        self.emit_data = Inc.incident_vector_calulate(SOD, obj_slice, self.fan, voxels_size=self.voxelsize)
 
+    def Scatter(self):
+        hc = HalfSpaceCutting()
+        ns_slit, rs_slit = hc.build_six_faces(self.slit[0:4], self.slit[4:])
+        p, q = hc.loda_point(self.obj_slice, self.det, rs_slit)
+        self.scatter_data = hc.through_slit(p, q, ns_slit)
+        
+        #------------------ calculate solid angle and decay ------------------#
+        vec = self.scatter_data["vec"]
+        start = self.obj_slice[self.scatter_data["m_idx"]]
+        end = self.det[self.scatter_data["n_idx"]]
+        r = np.linalg.norm(start - end, axis=1)
+        
+        cos_phi = np.linalg.norm(vec - np.dot(vec, ns_slit[0])*ns_slit[0])
+        self.scatter_data["solid_angle"] = self.pixelsize[0]*self.pixelsize[1] * cos_phi / r
+        ??? self.scatter_data["decay"] = Inc.voxel_path_length_cal()
+        #------------------ calculate solid angle and decay ------------------#
+        
+    def Cal_SysMatrix(self):
+        #------------------ find nozero-vectors ------------------#
+        A_ptr = self.emit_data["m_ptr"]; A_data = self.emit_data["data"]; A_idx = self.emit_data["idx"]; A_shape = self.emit_data["shape"]
+        B_ptr = self.scatter_data["m_ptr"]; B_data = self.scatter_data["data"]; B_idx = self.scatter_data["idx"]; B_shape = self.scatter_data["shape"]
+        M = A_shape[1]
+        assert B_shape[0] == M
+        
+        for m in range(M):
+            a0, a1 = A_ptr[m], A_ptr[m+1]
+            b0, b1 = B_ptr[m], B_ptr[m+1]
+            if a0 == a1 or b0 == b1: continue
+            
+            
 
 if __name__ == "__main__":
-    slitcorners = np.array([[56.31, 25, 66.32], [56.31, -25, 66.32], [55.54, -25, 66.97], [55.54, 25, 66.97],
-                       [60.16, 25, 70.92], [60.16, -25, 70.92], [59.4, -25, 71.56], [59.4, 25, 71.56]])
-    objcorners = np.array([[-100, 100, 45], [-100, -100, 45], [100, -100, 45], [100, 100, 45],
-                    [-100, 100, -45], [-100, -100, -45], [100, -100, -45], [100, 100, -45]])
+    # slitcorners = np.array([[56.31, 25, 66.32], [56.31, -25, 66.32], [55.54, -25, 66.97], [55.54, 25, 66.97],
+    #                    [60.16, 25, 70.92], [60.16, -25, 70.92], [59.4, -25, 71.56], [59.4, 25, 71.56]])
+    # objcorners = np.array([[-100, 100, 45], [-100, -100, 45], [100, -100, 45], [100, 100, 45],
+    #                 [-100, 100, -45], [-100, -100, -45], [100, -100, -45], [100, 100, -45]])
 
-    obj = np.array([[0.012, -19, 3.93], [0, 0, -40]])
-    det = np.array([[118, 10.5, 135.96], [0, 0, 0]])
+    # obj = np.array([[0.012, -19, 3.93], [0, 0, -40]])
+    # det = np.array([[118, 10.5, 135.96], [0, 0, 0]])
 
-    #pathLength=55.84  angle=80.38degree
+    # #pathLength=55.84  angle=80.38degree
 
-    scatterVec = ScatterVec(objcorners, slitcorners, 1)
-    cos_phi, valid = scatterVec.SlitCalculate(obj, det)
-    pathlenth = scatterVec.SVCalculate(obj, det)
-    # print(cos_phi, np.cos(np.deg2rad(80.38)))
-    # print(valid)
-    print(np.linalg.norm(pathlenth))
+    # scatterVec = ScatterVec(objcorners, slitcorners, 1)
+    # cos_phi, valid = scatterVec.SlitCalculate(obj, det)
+    # pathlenth = scatterVec.SVCalculate(obj, det)
+    # # print(cos_phi, np.cos(np.deg2rad(80.38)))
+    # # print(valid)
+    # print(np.linalg.norm(pathlenth))
+
+    cor = [[-1, -2], [-1, 2], [1, 2], [1, -2]]
+    pixelsize = [0.5, 0.5]
+    detsize = [2, 2]
+    centers = DetArray(cor, pixelsize,detsize)
+    print(centers)
+
+
