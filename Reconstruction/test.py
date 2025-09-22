@@ -264,7 +264,13 @@ class ReConstruction:
         X = np.zeros_like(Y)
         self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
         #------------------ slice sample ------------------#
-        # self.emit_data = Inc.incident_vector_calulate(SOD, obj_slice_size, ny, nz, self.fan, voxels_size=self.voxelsize)
+        self.emit_data = Inc.incident_vector_calulate(SOD,
+                                                      obj_slice_size,
+                                                      ny,
+                                                      nz,
+                                                      self.fan, 
+                                                      ray_step=np.deg2rad(1),
+                                                      voxels_size=self.voxelsize)
 
     def Scatter(self):
         hc = HalfSpaceCutting()
@@ -411,16 +417,5 @@ if __name__ == "__main__":
     
     tool.Emit()
     tool.Scatter()
-    
-
-    # scatterVec = ScatterVec(objcorners, slitcorners, 1)
-    # cos_phi, valid = scatterVec.SlitCalculate(obj, det)
-    # pathlenth = scatterVec.SVCalculate(obj, det)
-    # # print(cos_phi, np.cos(np.deg2rad(80.38)))
-    # # print(valid)
-    # print(np.linalg.norm(pathlenth))
-
-    # hc = HalfSpaceCutting()
-    # ns_slit, rs_slit = hc.build_six_faces(slitcorners[0:4], slitcorners[4:])
     
 

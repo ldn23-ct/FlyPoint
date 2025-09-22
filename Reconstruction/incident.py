@@ -4,14 +4,14 @@ import matplotlib.pyplot as plt
 import os
 eps = 1e-6
 
-def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],ny=200,nz=90,ray_angle=15,ray_step=1,voxels_size=[1,1],attenuation = 0.68):
+def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],ny=200,nz=90,ray_angle=15,ray_step=1,voxels_size=[1, 1, 1],attenuation = 0.68):
     '''
     计算入射向量矩阵(每个元素的值代表对应角度，对应体素处的入射向量，向量方向为射线方向，大小为入射强度)
     input:
         distance_of_source2object: 源到物体前表面的距离
         object_size: 物体的实际尺寸(x=y,z) 单位mm
         ny,nz: y,z方向网格数量,要求ny为偶数
-        ray_angle: 射线角度范围的一半(偏离垂直入射的最大角度) 单位°
+        ray_angle: 射线角度范围的一半(偏离垂直入射的最大角度) 统一按弧度制计算弧度制
         ray_step: 射线角度步长 单位°
         voxels_size: 体素的大小[z,y] 单位mm
         attenuation: 衰减系数
@@ -122,29 +122,46 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
 
     # 拼接：先镜像部分(y<0)，再原部分(y>=0)
     vector_full = np.concatenate([vector_mirror, vector], axis=1)
-
-    p,m_y,m_z,_ = np.nonzero(vector_full)
-    m = 10 * m_y + m_z
-    order = np.argsort(m)
-    p = p[order]
-    m_ptr = np.zeros(ny*nz+1,dtype=np.int32)
-    m_unique, counts = np.unique(m, return_counts=True)
-        
-    m_cnts = np.zeros(m); ptr = np.zeros(m+1); sum = 0
+    # p,m_y,m_z,_ = np.nonzero(vector_full)
+    # m = 10 * m_y + m_z
+    # order = np.argsort(m)
+    # p = p[order]
+    
+    ??? vector_full = vector_full.reshape(nray, -1, 3)
+    p_idx, m_idx, _ = np.nonzero(vector_full)
+    order = np.argsort(m_idx, kind="stable")
+    p_idx = p_idx[order]
+    data = vector_full[p_idx, m_idx, :].astype(dtype=np.float64, copy=False)
+    M = vector_full.shape[1]
+    m_cnts, m_ptr, sum = np.zeros(M), np.zeros(M+1), 0
+    m_unique, counts = np.unique(m_idx, return_counts=True)
     for k in range(m_unique.shape[0]):
         m_cnts[m_unique[k]] = counts[k]
-    for k in range(1, m+1):
-        sum += m_cnts[k-1]
-        m_ptr[k] = sum
+    for k in range(M):
+        sum += m_cnts[k]
+        m_ptr[k + 1] = sum 
+        
+    # m_ptr = np.zeros(ny*nz+1,dtype=np.int32)
+    # m_unique, counts = np.unique(m, return_counts=True)
+    # m_cnts = np.zeros(m); ptr = np.zeros(m+1); sum = 0
+    # for k in range(m_unique.shape[0]):
+    #     m_cnts[m_unique[k]] = counts[k]
+    # for k in range(1, m+1):
+    #     sum += m_cnts[k-1]
+    #     m_ptr[k] = sum
 
-    data = vector_full[p,m_y,m_z,:]
-    vec = data/(np.linalg.norm(data,axis=1,keepdims=True)+eps) 
-    data = np.linalg.norm(data,axis=1,keepdims=True)
+    # data = vector_full[p,m_y,m_z,:]
+    # vec = data/(np.linalg.norm(data,axis=1,keepdims=True)+eps) 
+    # data = np.linalg.norm(data,axis=1,keepdims=True)
+    
+    vec = data / np.linalg.norm(data, axis=1, keepdims=True)
+    
     return {
             "m_ptr": m_ptr,
-            "p_idx": p.astype(np.int32, copy=False),
+            "p_idx": p_idx.astype(np.int32, copy=False),
             "data": data.astype(np.float32, copy=False),
             "vec": vec.astype(np.float32, copy=False),
+            "shape": (nray, M)
     }
 
     # return vector_full
