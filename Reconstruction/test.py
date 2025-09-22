@@ -219,105 +219,6 @@ class HalfSpaceCutting:
             "n_idx": n_idx.astype(np.int32, copy=False),
             "shape": (m, n)
         }
-
-class ScatterVec:
-    '''
-    在半裁剪算法的基础上, 计算出射衰减, 以及是否穿过狭缝 \\
-    input: \\
-        objcorners--模体角点, 需要计算射线路径, ndarray of shape: [8, 3] \\
-        slitcorners--狭缝角点, 需要计算是否穿过狭缝, ndarray of shape: [8, 3] \\
-        obj--模体采样点, ndarray of shape: [m, 3] \\
-        det--探测器采样点, ndarray of shape: [n, 3] \\
-    output: \\
-        ScatterVector--散射射线向量, 被遮挡记作nan, 否则方向表示向量, 模长表示衰减, ndarray of shape: [a*b, c*c] \\
-        Angle--与探测器夹角余弦值, 用于计算kn项
-    '''
-    def __init__(self, slitcorners, dDet):
-        self.hc = HalfSpaceCutting()
-        self.ns_slit, self.rs_slit = self.hc.build_six_faces(slitcorners[0:4], slitcorners[4:])
-        self.dA = dDet
-
-    def SlitCalculate(self, obj, det):
-        '''
-        计算是否遮挡, 返回未被遮挡的空间点坐标  \\
-        计算探测器面元对体素点的立体角 \\
-        探测器平面与狭缝平行
-        '''
-        p, q = self.hc.loda_point(obj, det, self.rs_slit)
-        _, valid = self.hc.through_slit(p, q, self.ns_slit)
-        p_valid = p[valid]
-        temp = p_valid - np.dot(p_valid, self.ns_slit[0])*self.ns_slit[0]
-        cos_phi = np.linalg.norm(temp) / np.linalg.norm(p_valid)
-        solid_angle = self.dA * cos_phi / (np.linalg.norm(p_valid))**2
-        return cos_phi, valid
-
-    def Compress(self, A_csm: dict, B_csm: dict):
-        '''  
-        idea
-            先根据ptr找出A、B中共有的非空元素，再进行计算
-        '''
-        A_ptr = A_csm["m_ptr"]; A_data = A_csm["data"]; A_idx = A_csm["idx"]; A_shape = A_csm["shape"]
-        B_ptr = B_csm["m_ptr"]; B_data = B_csm["data"]; B_idx = B_csm["idx"]; B_shape = B_csm["shape"]
-        
-        M = A_shape[1]
-        assert B_shape[0] == M
-        
-        for m in range(M):
-            a0, a1 = A_ptr[m], A_ptr[m+1]
-            b0, b1 = B_ptr[m], B_ptr[m+1]
-            if a0 == a1 or b0 == b1: continue
-            
-            p_sub = A_idx[a0:a1]
-            U = A_data[a0:a1, :].astype(np.float64, copy=False)
-            n_sub = B_idx[b0:b1]
-            V = B_data[b0:b1, :].astype(np.float64, copy=False)
-            
-            cos_theta = U @ V.T
-            np.clip(cos_theta, -1.0, 1.0, out=cos_theta)
-            
-    def klein_nishina_dsigma_dOmega(E, mu, unit="keV"):
-        """
-        Klein–Nishina 微分散射截面（未极化、对自旋取平均）
-        输入:
-            E   : 入射光子能量（标量或 ndarray）
-            mu  : 散射角余弦 cos(theta)（标量或 ndarray，与 E 可广播）
-            unit: "keV" 或 "MeV"（默认 "keV"）
-        输出:
-            dsdo: 微分截面 dσ/dΩ，单位 cm^2/sr（ndarray 或标量）
-        公式:
-            E'/E = 1 / ( 1 + (E/mec2)*(1 - mu) )
-            dσ/dΩ = (re^2/2) * (E'/E)^2 * ( E'/E + E/E' - sin^2θ )
-                = (re^2/2) * (κ^2) * ( κ + 1/κ - (1 - mu^2) ), 其中 κ = E'/E
-        """
-        E = np.asarray(E, dtype=np.float64)
-        mu = np.asarray(mu, dtype=np.float64)
-
-        # 常数（以 cm、keV 为基准）
-        re_cm = 2.8179403262e-13        # 经典电子半径 [cm]
-        mec2_keV = 511.0                # 电子静能 [keV]
-
-        # 单位处理
-        if unit.lower() == "kev":
-            E_keV = E
-        elif unit.lower() == "mev":
-            E_keV = E * 1e3
-        else:
-            raise ValueError("unit 必须为 'keV' 或 'MeV'")
-
-        # 数值安全：将 mu 限制在 [-1, 1]
-        mu = np.clip(mu, -1.0, 1.0)
-
-        # 计算 E'/E
-        k = 1.0 / (1.0 + (E_keV / mec2_keV) * (1.0 - mu))   # κ = E'/E
-        invk = 1.0 / k
-
-        # sin^2 θ = 1 - mu^2
-        sin2 = 1.0 - mu**2
-
-        # Klein–Nishina 微分截面 [cm^2/sr]
-        dsdo = 0.5 * (re_cm**2) * (k**2) * (k + invk - sin2)
-        return dsdo
-
 class ReConstruction:
     '''
     '''
@@ -351,11 +252,11 @@ class ReConstruction:
     def Emit(self):
         SOD = self.obj_origin[2] - self.src[2]
         slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
-        ny = 2 * np.ceil(slice_halfy / self.voxelsize[1])
-        nz = np.ceil(self.objsize[2] / self.voxelsize[2])
-        obj_slice = [ny * self.voxelsize[1], self.objsize[2]]
+        ny = int(2 * np.ceil(slice_halfy / self.voxelsize[1]))
+        nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
+        obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
         #------------------ slice sample ------------------#
-        y_start = (obj_slice[0] - self.voxelsize[1]) / 2
+        y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
         z_start = SOD + self.voxelsize[2] / 2
         y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
         z_centers = [(z_start + i * self.voxelsize[2]) for i in range(nz)]
@@ -363,7 +264,7 @@ class ReConstruction:
         X = np.zeros_like(Y)
         self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
         #------------------ slice sample ------------------#
-        self.emit_data = Inc.incident_vector_calulate(SOD, obj_slice, self.fan, voxels_size=self.voxelsize)
+        self.emit_data = Inc.incident_vector_calulate(SOD, obj_slice_size, ny, nz, self.fan, voxels_size=self.voxelsize)
 
     def Scatter(self):
         hc = HalfSpaceCutting()
@@ -473,14 +374,45 @@ class ReConstruction:
             sys_matrix[m_idx[i], n_idx[i]] += coeffi[i]
             
     def BackProjection():
-        
+        pass
             
             
 
 if __name__ == "__main__":
+    src = np.array([0, 0, 0])
+    obj_origin = np.array([0, 0, 200])
+    objsize = np.array([200, 200, 70])
+    fan = np.deg2rad(12)
+    voxelsize = np.array([5, 5, 0.1])
     
+    SOD = obj_origin[2] - src[2]
+    slice_halfy = (SOD + objsize[2]) * np.tan(fan / 2)
+    ny = int(2 * np.ceil(slice_halfy / voxelsize[1]))
+    nz = int(np.ceil(objsize[2] / voxelsize[2]))
+    obj_slice_size = [ny * voxelsize[1], objsize[2]]
+    #------------------ slice sample ------------------#
+    y_start = (obj_slice_size[0] - voxelsize[1]) / 2
+    z_start = SOD + voxelsize[2] / 2
+    y_centers = [(y_start - i * voxelsize[1]) for i in range(ny)]
+    z_centers = [(z_start + i * voxelsize[2]) for i in range(nz)]
+    Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+    X = np.zeros_like(Y)
+    obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+    emit_data = Inc.incident_vector_calulate(SOD, obj_slice_size, ny, nz, fan, voxels_size=voxelsize)
+    Am_ptr = emit_data["m_ptr"]
+    Ap_idx = emit_data["p_idx"]
+    A_vec = emit_data["vec"]
+    A_data = emit_data["data"]
+    print(Am_ptr.shape)
+    print(Ap_idx.shape)
+    print(A_vec.shape)
+    print(A_data.shape)
+    
+
+
+ 
     # slitcorners = np.array([[56.31, 25, 66.32], [56.31, -25, 66.32], [55.54, -25, 66.97], [55.54, 25, 66.97],
-    #                    [60.16, 25, 70.92], [60.16, -25, 70.92], [59.4, -25, 71.56], [59.4, 25, 71.56]])
+                    #    [60.16, 25, 70.92], [60.16, -25, 70.92], [59.4, -25, 71.56], [59.4, 25, 71.56]])
     # objcorners = np.array([[-100, 100, 45], [-100, -100, 45], [100, -100, 45], [100, 100, 45],
     #                 [-100, 100, -45], [-100, -100, -45], [100, -100, -45], [100, 100, -45]])
 
@@ -496,10 +428,7 @@ if __name__ == "__main__":
     # # print(valid)
     # print(np.linalg.norm(pathlenth))
 
-    cor = [[-1, -2], [-1, 2], [1, 2], [1, -2]]
-    pixelsize = [0.5, 0.5]
-    detsize = [2, 2]
-    centers = DetArray(cor, pixelsize,detsize)
-    print(centers)
-
+    # hc = HalfSpaceCutting()
+    # ns_slit, rs_slit = hc.build_six_faces(slitcorners[0:4], slitcorners[4:])
+    
 

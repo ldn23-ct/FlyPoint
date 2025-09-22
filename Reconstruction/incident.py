@@ -4,37 +4,30 @@ import matplotlib.pyplot as plt
 import os
 eps = 1e-6
 
-def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ray_angle=15,ray_size=1,voxels_size=1,attenuation = 0.68):
+def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],ny=200,nz=90,ray_angle=15,ray_step=1,voxels_size=[1,1],attenuation = 0.68):
     '''
     计算入射向量矩阵(每个元素的值代表对应角度，对应体素处的入射向量，向量方向为射线方向，大小为入射强度)
-    并返回入射向量矩阵,shape(nray,ny,nz,3) vec = [z,y,x]
-    distance_of_source2object: 源到物体前表面的距离
-    object_size: 物体的实际尺寸(x=y,z) 单位mm
-    ray_angle: 射线角度范围的一半(偏离垂直入射的最大角度) 单位°
-    ray_size: 射线角度步长 单位°
-    voxels_size: 体素的大小 单位mm
-    attenuation: 衰减系数
+    input:
+        distance_of_source2object: 源到物体前表面的距离
+        object_size: 物体的实际尺寸(x=y,z) 单位mm
+        ny,nz: y,z方向网格数量,要求ny为偶数
+        ray_angle: 射线角度范围的一半(偏离垂直入射的最大角度) 单位°
+        ray_step: 射线角度步长 单位°
+        voxels_size: 体素的大小[z,y] 单位mm
+        attenuation: 衰减系数
+    output:
+        {
+            "m_ptr": m_ptr,shape(ny*nz+1),体素指针 ny=j,nz=i 对应 m=10*j+i
+            "p_idx": p_idx,shape(num_nonzero),非零体素在vector中的索引
+            "vec": np.array(vec_out_total).astype(np.float32, copy=False)，出射方向单位向量
+            "data": np.array(data_out).astype(np.float32, copy=False)，出射向量强度
     '''
 
-    '''
-    需要修改：
-    1. voxel 下标
-    2. input ny, nz
-    3. output
-       m_ptr
-       p_idx
-       vec  norm  方向
-       data  光通量
-    p, m = np.nonzero(matrix)
-    order = np.argsort(m)
-    p = p[order]  [0:3]--0  [3:5]--1
-    
-    '''
-
-    nray = math.floor(ray_angle / ray_size) + 1
-    ny = math.floor(object_size[1] / voxels_size) + 1
-    nz = math.floor(object_size[0] / voxels_size) + 1
-    ny = math.floor(ny * 0.5) + 1
+    nray = math.floor(ray_angle / ray_step) + 1
+    # ny = math.floor(object_size[1] / voxels_size[0]) + 1
+    # nz = math.floor(object_size[0] / voxels_size) + 1
+    # ny = math.floor(ny * 0.5) + 1
+    ny = math.floor(ny * 0.5)
     obj_y,obj_z = object_size
     vector = np.zeros((nray,ny,nz,3))
 
@@ -43,8 +36,8 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ra
     # voxel_size_y = obj_y / ny;
     # voxel_size_z = obj_z / nz;
 
-    voxel_size_y = voxels_size
-    voxel_size_z = voxels_size
+    voxel_size_y = voxels_size[1]
+    voxel_size_z = voxels_size[2]
     grid_origin =np.array([distance_of_source2object, - 0.5 * voxel_size_y,0])
 
     
@@ -130,9 +123,31 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[20,90],ra
     # 拼接：先镜像部分(y<0)，再原部分(y>=0)
     vector_full = np.concatenate([vector_mirror, vector], axis=1)
 
-
+    p,m_y,m_z,_ = np.nonzero(vector_full)
+    m = 10 * m_y + m_z
+    order = np.argsort(m)
+    p = p[order]
+    m_ptr = np.zeros(ny*nz+1,dtype=np.int32)
+    m_unique, counts = np.unique(m, return_counts=True)
         
-    return vector_full
+    m_cnts = np.zeros(m); ptr = np.zeros(m+1); sum = 0
+    for k in range(m_unique.shape[0]):
+        m_cnts[m_unique[k]] = counts[k]
+    for k in range(1, m+1):
+        sum += m_cnts[k-1]
+        m_ptr[k] = sum
+
+    data = vector_full[p,m_y,m_z,:]
+    vec = data/(np.linalg.norm(data,axis=1,keepdims=True)+eps) 
+    data = np.linalg.norm(data,axis=1,keepdims=True)
+    return {
+            "m_ptr": m_ptr,
+            "p_idx": p.astype(np.int32, copy=False),
+            "data": data.astype(np.float32, copy=False),
+            "vec": vec.astype(np.float32, copy=False),
+    }
+
+    # return vector_full
 
 def voxel_center_calulate(distance_of_source2object=40,object_size=[20,90],voxels_size=1):
     '''
@@ -162,20 +177,19 @@ def voxel_center_calulate(distance_of_source2object=40,object_size=[20,90],voxel
     voxel_center_full = np.concatenate([voxel_center_mirror, voxel_center], axis=0)
     return voxel_center_full
 
-def voxel_path_length_cal(grid_origin,grid_size,nx,ny,nz,ray_vec,ray_origin,attenuation = 0.68, output_type = "single"):
+def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,attenuation = 0.68,output_type="single"):
     '''
     计算体素路径长度
     input:
     grid_origin: 体素网格的原点坐标 [z,y,x]
     grid_size: 体素的大小
-    obj_size
-    start
-    end
+    obj_size: 物体的大小 [z,y,x] 单位mm
+    ray_start: 射线起始点 [z,y,x] 绝对坐标
+    ray_end: 射线结束点 [z,y,x] 绝对坐标 start 和 end 一一对应,要求ray_end在体素网格外
     attenuation: 衰减系数
-    output_type: 输出类型 "single" or "total"
-        "single": 输出每个入射射线与体素的交点坐标和对应的出射向量
-        "total": 输出每个入射射线对应的总出射向量
+    output_type: 输出类型 "single" 每条射线的路径长度和经过的体素坐标 "total" 每条射线的总出射向量(调试用)
     output:
+        vec: 每条射线的总出射向量，模为射线强度
 
     '''
     # ptr_in = m_ptr
@@ -193,30 +207,35 @@ def voxel_path_length_cal(grid_origin,grid_size,nx,ny,nz,ray_vec,ray_origin,atte
     #     vec_origin = grid_origin + np.array([n_idx_in[i] * grid_size[0],n_idx_in[i] * grid_size[1],0])
     #     vec_end = vec_origin + vec / vec_len * ()
 
-    num = np.shape(ray_vec)[0]
+    num = np.shape(ray_start)[0]
     # 用list动态存储
     vec_out = []
     vec_out_total = []
     nums, zs, ys, xs = [], [], [], []
 
     for num_i in range(num):
-        soc = grid_origin + grid_size * (ray_origin[num_i]+0.5)
-        vec_intensity = np.linalg.norm(ray_vec)
-        vec = ray_vec[num_i] / vec_intensity
-        d = nx + ny + nz
+        soc = ray_start[num_i]
+
+        nz = math.floor(obj_size[0] / grid_size[0])
+        ny = math.floor(obj_size[1] / grid_size[1])
+        nx = math.floor(obj_size[2] / grid_size[2])
+        vec_intensity = 1
+        vec = (ray_end[num_i] - ray_start[num_i])
+        d = np.linalg.norm(vec)
+        vec = vec / d
         final_vec = soc + d * vec
-        grid_x = grid_size
-        grid_y = grid_size 
-        grid_z = grid_size
+        grid_z = grid_size[0]
+        grid_y = grid_size[1]
+        grid_x = grid_size[2]
         az = np.zeros(nz)
         ay = np.zeros(ny)
         ax = np.zeros(nx)
         for i in range(nz):
-            az[i] = (grid_origin[0]+i*grid_z-soc[0]) / (final_vec[0] - ray_origin[num_i,0] + eps)
+            az[i] = (grid_origin[0]+i*grid_z-soc[0]) / (final_vec[0] - soc[0] + eps)
         for j in range(ny):
-            ay[j] = (grid_origin[1]+j*grid_y-soc[1]) / (final_vec[1] - ray_origin[num_i,1] + eps)
+            ay[j] = (grid_origin[1]+j*grid_y-soc[1]) / (final_vec[1] - soc[1] + eps)
         for k in range(nx):
-            ax[k] = (grid_origin[2]+k*grid_x-soc[2]) / (final_vec[2] - ray_origin[num_i,2] + eps)
+            ax[k] = (grid_origin[2]+k*grid_x-soc[2]) / (final_vec[2] - soc[2] + eps)
 
         az_min = min(az[0],az[nz-1])
         az_max = max(az[0],az[nz-1])
