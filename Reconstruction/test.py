@@ -201,7 +201,7 @@ class HalfSpaceCutting:
         order = np.argsort(m_idx, kind='stable')
         m_idx = m_idx[order]; n_idx = n_idx[order]
         v = p[m_idx, n_idx, :].astype(np.float64, copy=False)
-        v = v / np.linalg.norm(v, axis=1)     
+        v = v / np.linalg.norm(v, axis=1)[:, None]     
         m_unique, counts = np.unique(m_idx, return_counts=True)
         
         m_cnts = np.zeros(m); ptr = np.zeros(m+1); sum = 0
@@ -264,7 +264,7 @@ class ReConstruction:
         X = np.zeros_like(Y)
         self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
         #------------------ slice sample ------------------#
-        self.emit_data = Inc.incident_vector_calulate(SOD, obj_slice_size, ny, nz, self.fan, voxels_size=self.voxelsize)
+        # self.emit_data = Inc.incident_vector_calulate(SOD, obj_slice_size, ny, nz, self.fan, voxels_size=self.voxelsize)
 
     def Scatter(self):
         hc = HalfSpaceCutting()
@@ -278,7 +278,7 @@ class ReConstruction:
         end = self.det[self.scatter_data["n_idx"]]
         r = np.linalg.norm(start - end, axis=1)
         
-        cos_phi = np.linalg.norm(vec - np.dot(vec, ns_slit[0])*ns_slit[0])
+        cos_phi = np.linalg.norm(vec - np.dot(vec, ns_slit[0])[:, None] * ns_slit[0])
         solid_angle = self.pixelsize[0]*self.pixelsize[1] * cos_phi / r
         
         # 这里需要计算模体的一个角点空间坐标传入函数
@@ -288,6 +288,7 @@ class ReConstruction:
         end_point = self.det[self.scatter_data["n_idx"]]
         decay = Inc.voxel_path_length_cal(objcorner, self.voxelsize, self.objsize, start_point, end_point)
         assert solid_angle.shape[0] == decay.shape[0]
+        # decay = 1
         self.scatter_data["data"] = solid_angle * decay
         #------------------ calculate solid angle and decay ------------------#
  
@@ -380,46 +381,37 @@ class ReConstruction:
 
 if __name__ == "__main__":
     src = np.array([0, 0, 0])
-    obj_origin = np.array([0, 0, 200])
+    obj_origin = np.array([0, 0, 60])
     objsize = np.array([200, 200, 70])
-    fan = np.deg2rad(12)
+    fan = 12
     voxelsize = np.array([5, 5, 0.1])
-    
-    SOD = obj_origin[2] - src[2]
-    slice_halfy = (SOD + objsize[2]) * np.tan(fan / 2)
-    ny = int(2 * np.ceil(slice_halfy / voxelsize[1]))
-    nz = int(np.ceil(objsize[2] / voxelsize[2]))
-    obj_slice_size = [ny * voxelsize[1], objsize[2]]
-    #------------------ slice sample ------------------#
-    y_start = (obj_slice_size[0] - voxelsize[1]) / 2
-    z_start = SOD + voxelsize[2] / 2
-    y_centers = [(y_start - i * voxelsize[1]) for i in range(ny)]
-    z_centers = [(z_start + i * voxelsize[2]) for i in range(nz)]
-    Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
-    X = np.zeros_like(Y)
-    obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
-    emit_data = Inc.incident_vector_calulate(SOD, obj_slice_size, ny, nz, fan, voxels_size=voxelsize)
-    Am_ptr = emit_data["m_ptr"]
-    Ap_idx = emit_data["p_idx"]
-    A_vec = emit_data["vec"]
-    A_data = emit_data["data"]
-    print(Am_ptr.shape)
-    print(Ap_idx.shape)
-    print(A_vec.shape)
-    print(A_data.shape)
-    
-
-
- 
+    det_size = np.array([50, 50])
+    pixelsize = np.array([1, 1])
+    det_corners = [[60, -25, 40], [60, 25, 40], [110, 25, 40], [110, -25, 40]]
     # slitcorners = np.array([[56.31, 25, 66.32], [56.31, -25, 66.32], [55.54, -25, 66.97], [55.54, 25, 66.97],
-                    #    [60.16, 25, 70.92], [60.16, -25, 70.92], [59.4, -25, 71.56], [59.4, 25, 71.56]])
-    # objcorners = np.array([[-100, 100, 45], [-100, -100, 45], [100, -100, 45], [100, 100, 45],
-    #                 [-100, 100, -45], [-100, -100, -45], [100, -100, -45], [100, 100, -45]])
-
-    # obj = np.array([[0.012, -19, 3.93], [0, 0, -40]])
-    # det = np.array([[118, 10.5, 135.96], [0, 0, 0]])
-
-    # #pathLength=55.84  angle=80.38degree
+    #                    [60.16, 25, 70.92], [60.16, -25, 70.92], [59.4, -25, 71.56], [59.4, 25, 71.56]])
+    slitcorners = np.array([[54, 25, 60], [54, -25, 60], [53, -25, 60], [53, 25, 60],
+                            [54, 25, 59], [54, -25, 59], [53, -25, 59], [53, 25, 59]])
+    E = np.array([120, 160])
+    prob = np.array([0.4, 0.6])
+    rho = 1
+    
+    tool = ReConstruction(src,
+                          obj_origin,
+                          objsize,
+                          voxelsize,
+                          det_corners,
+                          det_size,
+                          pixelsize,
+                          fan,
+                          slitcorners,
+                          E,
+                          prob,
+                          rho)
+    
+    tool.Emit()
+    tool.Scatter()
+    
 
     # scatterVec = ScatterVec(objcorners, slitcorners, 1)
     # cos_phi, valid = scatterVec.SlitCalculate(obj, det)
