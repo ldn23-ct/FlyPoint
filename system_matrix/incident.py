@@ -9,11 +9,11 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,200,9
     计算入射向量矩阵(每个元素的值代表对应角度，对应体素处的入射向量，向量方向为射线方向，大小为入射强度)
     input:
         distance_of_source2object: 源到物体前表面的距离
-        object_size: 物体的实际尺寸(x=y,z) 单位mm
+        object_size: 物体的实际尺寸(x，y，z) 单位mm
         ny,nz: y,z方向网格数量,要求ny为偶数
         ray_angle: 射线角度范围的一半(偏离垂直入射的最大角度) 单位°
         ray_step: 射线角度步长 单位°
-        voxels_size: 体素的大小[z,y] 单位mm
+        voxels_size: 体素的大小[z,y,x] 单位mm
         attenuation: 衰减系数
     output:
         {
@@ -182,19 +182,19 @@ def voxel_center_calulate(distance_of_source2object=40,object_size=[20,90],voxel
     voxel_center_full = np.concatenate([voxel_center_mirror, voxel_center], axis=0)
     return voxel_center_full
 
-def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,attenuation = 0.68,output_type="total"):
+def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,attenuation = 29.9,output_type="total"):
     '''
     计算体素路径长度
     input:
-    grid_origin: 体素网格的原点坐标 [z,y,x]
-    grid_size: 体素的大小 [z,y,x] 单位mm
-    obj_size: 物体的大小 [z,y,x] 单位mm
-    ray_start: 射线起始点 [z,y,x] 绝对坐标
-    ray_end: 射线结束点 [z,y,x] 绝对坐标 start 和 end 一一对应,要求ray_end在体素网格外
-    attenuation: 衰减系数
+    grid_origin: 体素网格的原点坐标 [x,y,z]
+    grid_size: 体素的大小 [x,y,z] 单位mm
+    obj_size: 物体的大小 [x,y,z] 单位mm
+    ray_start: 射线起始点 [x,y,z] 绝对坐标
+    ray_end: 射线结束点 [x,y,z] 绝对坐标 start 和 end 一一对应,要求ray_end在体素网格外
+    attenuation: 衰减系数 单位 1/m
     output_type: 输出类型 "single" 每条射线的路径长度和经过的体素坐标(调试用)  "total" 每条射线的总出射向量
     output:
-        vec: 每条射线的总出射向量，模为射线强度
+        data: 每条射线的出射衰减
 
     '''
     # ptr_in = m_ptr
@@ -215,8 +215,8 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
     grid_origin[[0,2]] = grid_origin[[2,0]]
     obj_size[[0,2]] = obj_size[[2,0]]
     grid_size[[0,2]] = grid_size[[2,0]]
-    ray_start[[0,2]] = ray_start[[2,0]]
-    ray_end[[0,2]] = ray_end[[2,0]]
+    ray_start[:,[0,2]] = ray_start[:,[2,0]]
+    ray_end[:,[0,2]] = ray_end[:,[2,0]]
     num = np.shape(ray_start)[0]
     # 用list动态存储
     vec_out_single = []
