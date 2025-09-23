@@ -390,8 +390,8 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
             intensity = 1
             d12 = d * a_max * 0.001
             i12 = intensity * np.exp(-attenuation * d12)
-            vec_out_total.append(i12 * vec)
-
+           # vec_out_total.append(i12 * vec)
+            vec_out_total.append(i12)
     if output_type == "single":
         vec_out = np.array(vec_out_single).astype(np.float32, copy=False)
         vec_out[[0,2]] = vec_out[[2,0]]
@@ -404,7 +404,8 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
         }
     if output_type == "total":
         vec_out = np.array(vec_out_total).astype(np.float32, copy=False)
-        vec_out[[0,2]] = vec_out[[2,0]]
-        data = np.linalg.norm(vec_out,axis=1,keepdims=True)
-        data = np.array(data, dtype=np.float32)
-        return data
+        #vec_out[[0,2]] = vec_out[[2,0]]
+        #data = np.linalg.norm(vec_out,axis=1,keepdims=True)
+        #data = np.array(data, dtype=np.float32)
+
+        return vec_out
