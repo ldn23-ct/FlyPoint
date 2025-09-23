@@ -44,7 +44,7 @@ def Mapping(pos: np.ndarray, objsize: np.ndarray, voxelsize: np.ndarray, kernels
 def DetArray(corners: list, pixelsize: list, detsize: list):
     '''
     input
-        corner_pos--4 corners position of the detector
+        corner_pos--4 corners position of the detector  左上角起点，逆时针排序
         dx/dy--length of the detector pixel
         x/y--length of the detector
     output
@@ -213,7 +213,7 @@ class HalfSpaceCutting:
         
         # return v.astype(np.float32, copy=False), ptr, n_idx.astype(np.int32, copy=False)
         return {
-            "m_ptr": ptr,
+            "m_ptr": ptr.astype(np.int32, copy=False),
             "vec": v.astype(np.float32, copy=False),
             "m_idx": m_idx.astype(np.int32, copy=False),
             "n_idx": n_idx.astype(np.int32, copy=False),
@@ -288,7 +288,7 @@ class ReConstruction:
         solid_angle = self.pixelsize[0]*self.pixelsize[1] * cos_phi / r
         
         # 这里需要计算模体的一个角点空间坐标传入函数
-        objcorner = self.objsize / 2
+        objcorner = -1 * self.objsize / 2
         objcorner[2] = self.obj_origin[2] - self.src[2]
         start_point = self.obj_slice[self.scatter_data["m_idx"]]
         end_point = self.det[self.scatter_data["n_idx"]]
@@ -343,32 +343,34 @@ class ReConstruction:
         assert B_shape[0] == M
         
         cos_theta, m_idx, p_idx, n_idx, coeffi = np.array([]), np.array([]), np.array([]), np.array([]), np.array([])
-        m_ptr = np.zeros(M + 1)
+        num = 0
         for m in range(M):
             a0, a1 = A_ptr[m], A_ptr[m+1]
             b0, b1 = B_ptr[m], B_ptr[m+1]
             if a0 == a1 or b0 == b1: continue
-            p_sub, n_sub = Ap_idx[a0:a1], Bn_idx[a0:a1]
-            emit_vec, emit_data = A_vec[a0:a1], A_data[a0:a1]
-            scatter_vec, scatter_data = B_vec[b0:b1], B_data[b0:b1]
+            p_sub, n_sub = Ap_idx[a0:a1], Bn_idx[b0:b1]
+            emit_vec, emit_data = A_vec[a0:a1], A_data[a0:a1][:, None]
+            scatter_vec, scatter_data = B_vec[b0:b1], B_data[b0:b1][:, None]
             
+            num += p_sub.shape[0]*n_sub.shape[0]
             #---------------kn项余弦---------------#
             costheta = (emit_vec @ scatter_vec.T).ravel()  # shape: [a*b,]
             np.clip(costheta, -1.0, 1.0, out=costheta)
-            cos_theta = np.hstack(cos_theta, costheta)
+            cos_theta = np.hstack((cos_theta, costheta))
             #---------------kn项余弦---------------#
             
             #---------------入/出射衰减及立体角---------------#
             k = (emit_data @ scatter_data.T).ravel()  # shape: [a*b,]
-            coeffi = np.hstack(coeffi, k)
+            coeffi = np.hstack((coeffi, k))
             #---------------入/出射衰减及立体角---------------#
             
             #---------------索引网格重组---------------#
             # m_ptr[m + 1] = costheta.shape[0]
-            ps, ns = np.meshgrid(p_sub, n_sub)
-            m_idx = np.hstack(m_idx, np.array([m]*ps.shape[0]))
-            p_idx = np.hstack(p_idx, ps.ravel())
-            n_idx = np.hstack(n_idx, ns.ravel())
+            ps, ns = np.meshgrid(p_sub, n_sub, indexing='ij')
+            pss, nss = ps.ravel(), ns.ravel()
+            m_idx = np.hstack((m_idx, np.array([m]*pss.shape[0])))
+            p_idx = np.hstack((p_idx, pss))
+            n_idx = np.hstack((n_idx, nss))
             #---------------索引网格重组---------------#
         
         # kn项，需要结合物体电子密度计算
@@ -377,8 +379,10 @@ class ReConstruction:
         
         # 不同p之间进行合并
         sys_matrix = np.zeros(B_shape)
+        m_idx, n_idx = m_idx.astype(np.int32), n_idx.astype(np.int32)
         for i in range(coeffi.shape[0]):
             sys_matrix[m_idx[i], n_idx[i]] += coeffi[i]
+        return sys_matrix
             
     def BackProjection():
         pass
@@ -393,7 +397,7 @@ if __name__ == "__main__":
     voxelsize = np.array([5, 5, 0.1])
     det_size = np.array([50, 50])
     pixelsize = np.array([1, 1])
-    det_corners = [[60, -25, 40], [60, 25, 40], [110, 25, 40], [110, -25, 40]]
+    det_corners = [[110, 25, 40], [110, -25, 40], [60, -25, 40], [60, 25, 40]]
     # slitcorners = np.array([[56.31, 25, 66.32], [56.31, -25, 66.32], [55.54, -25, 66.97], [55.54, 25, 66.97],
     #                    [60.16, 25, 70.92], [60.16, -25, 70.92], [59.4, -25, 71.56], [59.4, 25, 71.56]])
     slitcorners = np.array([[54, 25, 60], [54, -25, 60], [53, -25, 60], [53, 25, 60],
@@ -417,5 +421,11 @@ if __name__ == "__main__":
     
     tool.Emit()
     tool.Scatter()
+    sysMatrix = tool.Cal_SysMatrix()
+    print(sysMatrix.shape)
     
-
+    
+    
+    
+    # obj_corners = np.array([[-100, 100, 60], [-100, -100, 60], [100, -100, 60], [100, 100, 60],
+    #                         [-100, 100, 130], [-100, -100, 130], [100, -100, 130], [100, 100, 130]])
