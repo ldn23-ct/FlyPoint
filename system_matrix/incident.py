@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 eps = 1e-6
 
-def incident_vector_calulate(distance_of_source2object=40,object_size=[200,200,90],ny=200,nz=90,ray_angle=15*np.pi/180,ray_step=1*np.pi/180,voxels_size=[1,1,1],attenuation = 0.68):
+def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],ny=200,nz=90,ray_angle=15*np.pi/180,ray_step=1*np.pi/180,voxels_size=[1,1,1],attenuation = 0.68):
     '''
     计算入射向量矩阵(每个元素的值代表对应角度，对应体素处的入射向量，向量方向为射线方向，大小为入射强度)
     input:
@@ -29,7 +29,7 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,200,9
     # ny = math.floor(ny * 0.5) + 1
     ny = math.floor(ny * 0.5)
     obj_y,obj_z = object_size
-    vector = np.zeros((nray,ny,nz,3))
+    data = np.zeros((nray,ny,nz))
 
     rays = np.linspace(0,ray_angle,nray)
 
@@ -91,13 +91,12 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,200,9
 
         i = first_i
         j = first_j
-        d12 = d_final * ac * 0.001
+        d12 = 0
         delta_d = 0 
-        intensity = 100
+        intensity = 1
         for q in range(Np+1):
-            i12 = intensity * np.exp(-attenuation * delta_d)
-            vector[p,j,i,:] = i12 * ray_vec
-            intensity = i12
+            i12 = intensity * np.exp(-attenuation * d12)
+            data[p,j,i] = i12
             if a_z < a_y:
                 delta_d = (a_z - ac) * d_final * 0.001
                 d12 = d12 + delta_d
@@ -117,20 +116,18 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,200,9
     # vector_pos = vector[:, 1:, :, :]     # shape (nray, ny-1, nz, 3)
 
     # 沿 y 维度翻转
-    vector_mirror = np.flip(vector, axis=1)  # 翻转 y 方向
+    data_mirror = np.flip(data, axis=1)  # 翻转 y 方向
 
-    # y 分量取负（索引2对应xyz中的y分量）
-    vector_mirror[:, :, :, 1] *= -1
 
     # 拼接：先镜像部分(y<0)，再原部分(y>=0)
-    vector_full = np.concatenate([vector_mirror, vector], axis=1)
+    data_full = np.concatenate([data_mirror, data], axis=1)
     ny = 2 * ny
-    p,m_y,m_z,_ = np.nonzero(vector_full)
-    data = vector_full[p,m_y,m_z,:]
+    p,m_y,m_z = np.nonzero(data_full)
+    data = data_full[p,m_y,m_z]
     m = nz * m_y + m_z
     order = np.argsort(m)
     m_num = ny * nz
-    p = p[order]
+    p_idx = p[order]
     data = data[order]
     m_ptr = np.zeros(m_num+1,dtype=np.int32)
     m_unique, counts = np.unique(m, return_counts=True)   
@@ -141,13 +138,12 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,200,9
         sum += m_cnts[k-1]
         m_ptr[k] = sum
 
-    vec = data/(np.linalg.norm(data,axis=1,keepdims=True)+eps)
+    vec = np.tile(ray_vec, (len(p_idx), 1))
     vec[:,[0,2]] = vec[:,[2,0]]
-    # vec = np.transpose(vec,(2,1,0))
-    data = np.linalg.norm(data,axis=1,keepdims=True)
+
     return {
             "m_ptr": m_ptr,
-            "p_idx": p.astype(np.int32, copy=False),
+            "p_idx": p_idx.astype(np.int32, copy=False),
             "data": data.astype(np.float32, copy=False),
             "vec": vec.astype(np.float32, copy=False),
     }
@@ -390,8 +386,8 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
             intensity = 1
             d12 = d * a_max * 0.001
             i12 = intensity * np.exp(-attenuation * d12)
-           # vec_out_total.append(i12 * vec)
-            vec_out_total.append(i12)
+            vec_out_total.append(i12 * vec)
+
     if output_type == "single":
         vec_out = np.array(vec_out_single).astype(np.float32, copy=False)
         vec_out[[0,2]] = vec_out[[2,0]]
@@ -404,8 +400,27 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
         }
     if output_type == "total":
         vec_out = np.array(vec_out_total).astype(np.float32, copy=False)
-        #vec_out[[0,2]] = vec_out[[2,0]]
-        #data = np.linalg.norm(vec_out,axis=1,keepdims=True)
-        #data = np.array(data, dtype=np.float32)
+        vec_out[[0,2]] = vec_out[[2,0]]
+        data = np.linalg.norm(vec_out,axis=1,keepdims=True)
+        data = np.array(data, dtype=np.float32)
+        return data
 
-        return vec_out
+def main():
+    distance_of_source2object=5
+    object_size=[4,4]
+    ny=4
+    nz=4
+    ray_angle=5*np.pi/180
+    ray_step=5*np.pi/180
+    voxels_size=[1,1,1]
+    attenuation = 50
+    grid_origin = np.array([40, -100, 0])
+    grid_size = np.array([1, 1, 1])
+    ray_start = np.array([[0,0,0],[0,10,0],[0,20,0],[0,30,0],[0,40,0],[0,50,0],[0,60,0],[0,70,0],[0,80,0],[0,90,0],[0,100,0]])
+    ray_end = np.array([[100,0,0],[100,10,0],[100,20,0],[100,30,0],[100,40,0],[100,50,0],[100,60,0],[100,70,0],[100,80,0],[100,90,0],[100,100,0]])
+    result = incident_vector_calulate(distance_of_source2object,object_size,ny,nz,ray_angle,ray_step,voxels_size,attenuation)
+    result2 = voxel_path_length_cal(grid_origin,grid_size,object_size,ray_start,ray_end,attenuation = 29.9,output_type="total")
+    print("done")
+
+if __name__ == "__main__":
+    main()
