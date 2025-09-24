@@ -343,14 +343,13 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
             intensity = vec_intensity
             # for q in range(Np+1):
             while True:
-                i12 = intensity * np.exp(-attenuation * delta_d)
+                i12 = intensity * np.exp(-attenuation * d12)
                 if d12 > 0:
                     nums.append(num_i)
                     zs.append(i)
                     ys.append(j)
                     xs.append(k)
                     vec_out_single.append(i12 * vec)
-                intensity = i12
                 if a_z < a_y and a_z < a_x:
                     if ac >0:
                         delta_d = (a_z - ac) * d * 0.001
@@ -423,4 +422,5 @@ def main():
     print("done")
 
 if __name__ == "__main__":
+
     main()
