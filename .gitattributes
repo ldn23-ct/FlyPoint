@@ -1,0 +1,32 @@
+# ---- Normalize line endings: force LF everywhere ----
+*            text eol=auto
+
+# Binary files (never touch line endings)
+*.png        binary
+*.jpg        binary
+*.jpeg       binary
+*.gif        binary
+*.bmp        binary
+*.pdf        binary
+*.zip        binary
+*.7z         binary
+*.gz         binary
+*.tar        binary
+*.exe        binary
+*.dll        binary
+
+# Language-specific (可选，只是示例，因上面已经全局 eol=lf)
+*.c          text eol=lf
+*.cc         text eol=lf
+*.cpp        text eol=lf
+*.h          text eol=lf
+*.hpp        text eol=lf
+CMakeLists.txt text eol=lf
+*.cmake      text eol=lf
+*.py         text eol=lf
+*.txt        text eol=lf
+*.md         text eol=lf
+
+# Windows 脚本若确需 CRLF（可选）
+# *.bat      text eol=crlf
+# *.cmd      text eol=crlf
