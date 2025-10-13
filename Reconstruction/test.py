@@ -82,164 +82,6 @@ def DetArray(corners: list, pixelsize: list, detsize: list):
     centers = (centers.transpose(1, 0, 2)).reshape((-1, 3))
     return n/nn, centers
 
-class HalfSpaceCutting:
-    '''
-    判断射线束是否与立方体相交，同时输出相交长度 \\
-    (1) 根据平面角点，构造有序顶点集合并计算向外法向量 \\
-    (2) 读取空间点集合，构造 {pi, qi} 矩阵 \\
-    (3) 验证线段是否与平面相交，若相交求出参数t \\
-    (4) 对六面取交集，判断是否经过狭缝，输出mask \\
-    (5) 对于经过狭缝的射线，计算出射衰减
-    '''
-    def plane_normal(self, verts: np.ndarray, centroid: np.ndarray):
-        '''
-        input
-            verts: 有序顶点集合，按逆时针排序 shape:[4, 3], 左上角开始
-            centroid: 六面体几何中心 shape:[3,]
-        output
-            normal: 向外归一化法向量 shape:[3,]
-            m: 面中心点 shape:[3,]
-        '''
-        v0, v1, v2 = verts[0], verts[1], verts[2]
-        n = np.cross(v1 - v0, v2 - v0)
-        nn = np.linalg.norm(n)
-        if nn == 0:
-            raise ValueError("collinear vertices")
-        m = verts.mean(axis=0)
-        if np.dot(n, m - centroid) < 0: 
-            verts = verts[::-1].copy()
-            n = -n
-        return verts, n / nn, m
-
-    def loda_point(self, obj_array, det_array, r_array):
-        '''
-        input
-            obj_array--shape:[a*b, 3]
-            det_array--shape:[c*c, 3]
-            r_array--shape:[6, 3]
-        output
-            p--(det_array - obj_array) shape:[a*b, c*c, 3]
-            q--(obj_array - m) shape:[6, a*b, 3]
-        '''
-        p = det_array[None, :, :] - obj_array[:, None, :]
-        q = obj_array[None, :, :] - r_array[:, None, :]
-        return p, q
-    
-    def build_six_faces(self, entrance, exit):
-        '''
-        input
-            entrance--shape:[4, 3]
-            exit--shape:[4, 3]
-        output
-            faces--[dics{name, verts, n, r}]
-        '''
-        corners = np.vstack((entrance, exit))
-        centroid = np.mean(corners, axis=0)
-        # faces = []
-        A4, nA, rA = self.plane_normal(entrance, centroid)
-        B4, nB, rB = self.plane_normal(exit, centroid)
-        ns, rs = [nA, nB], [rA, rB]
-        # faces.append({"name": "A", "verts": A4, "n": nA, "r": rA})
-        # faces.append({"name": "B", "verts": B4, "n": nB, "r": rB})
-        for k in range(4):
-            verts = np.array([exit[k], entrance[k], entrance[(k+3)%4], exit[(k+3)%4]])
-            k4, nk, rk = self.plane_normal(verts, centroid)
-            # faces.append({"name": str(k), "verts": k4, "n": nk, "r": rk})
-            ns.append(nk)
-            rs.append(rk)
-        return np.array(ns), np.array(rs)
-    
-    def through_slit(self, p: np.ndarray, q: np.ndarray, ns: np.ndarray, require_enter=True, eps_base=1e-9, enter_plane=0, exit_plane=1):
-        '''
-        input
-            p--(det_array - obj_array) shape:[a*b, c*c, 3]
-            q--(obj_array - r) shape:[6, a*b, 3]
-            ns--shape:[6, 3]
-        output
-            csm: {'m_idx','n_idx','vec','ptr'}
-        idea
-            线段穿过狭缝的判据
-            1. 不存在外侧平行面
-            2. 进入面最大值与离开面最小值分别在A/B取得
-            3. 进入面最大值要小于离开面最小值        
-        '''
-        print("enter through_slit")
-        m, n, _ = p.shape
-        assert q.shape == (6, m, 3)
-        
-        scale = max(1.0,
-                    float(np.max(np.linalg.norm(p.reshape(-1,3), axis=1))) if p.size else 1.0,
-                    float(np.max(np.linalg.norm(q.reshape(-1,3), axis=1))) if q.size else 1.0,
-                    float(np.max(np.linalg.norm(ns, axis=1))) if ns.size else 1.0)
-        eps = eps_base * scale
-        # eps = eps_base
-        
-        tE = np.full((m, n), -np.inf, dtype=p.dtype)
-        tL = np.full((m, n), np.inf, dtype=p.dtype)
-        enter_idx = np.full((m, n), -1, dtype=np.int32)
-        exit_idx = np.full((m, n), -1, dtype=np.int32)
-        outside_para_mask = np.zeros((m, n), dtype=bool)
-        
-        for k in range(ns.shape[0]):
-            n_k, qs_k = ns[k], q[k, ...]
-            ps = - (p @ n_k)    # [m, n]
-            qs = (qs_k @ n_k) [:, None]     # [m, 1]
-            
-            enter_mask = ps > eps
-            exit_mask = ps < -eps
-            para = np.abs(ps) <= eps
-            outside_para_mask |= para & (qs > eps)
-            
-            t = np.zeros_like(ps)
-            np.divide(qs, ps, out=t, where=~para)
-            
-            better_enter_mask = enter_mask & (t > tE)
-            if np.any(better_enter_mask):
-                tE[better_enter_mask] = t[better_enter_mask]
-                enter_idx[better_enter_mask] = k
-            
-            better_exit_mask = exit_mask & (t < tL)
-            if np.any(better_exit_mask):
-                tL[better_exit_mask] = t[better_exit_mask]
-                exit_idx[better_exit_mask] = k
-        
-        print("first done")
-        
-        t0 = np.maximum(tE, 0)
-        t1 = np.minimum(tL, 1)
-
-        valid = (~outside_para_mask) & (tE <= tL + eps) & (t0 <= t1 + eps)
-
-        if require_enter:
-            valid = valid & (enter_idx == enter_plane) & (exit_idx == exit_plane)
-        
-        print("second done")
-        
-        m_idx, n_idx = np.nonzero(valid)
-        order = np.argsort(m_idx, kind='stable')
-        m_idx = m_idx[order]; n_idx = n_idx[order]
-        v = p[m_idx, n_idx, :].astype(np.float64, copy=False)
-        v = v / np.linalg.norm(v, axis=1)[:, None]     
-        m_unique, counts = np.unique(m_idx, return_counts=True)
-        
-        m_cnts = np.zeros(m); ptr = np.zeros(m+1); sum = 0
-        for k in range(m_unique.shape[0]):
-            m_cnts[m_unique[k]] = counts[k]
-        for k in range(1, m+1):
-            sum += m_cnts[k-1]
-            ptr[k] = sum
-        
-        print("through_slits done")
-        np.save("./data/emit_mptr.npy", ptr)
-        np.save("./data/emit_nidx.npy", n_idx)
-        # return v.astype(np.float32, copy=False), ptr, n_idx.astype(np.int32, copy=False)
-        return {
-            "m_ptr": ptr.astype(np.int32, copy=False),
-            "vec": v.astype(np.float32, copy=False),
-            "m_idx": m_idx.astype(np.int32, copy=False),
-            "n_idx": n_idx.astype(np.int32, copy=False),
-            "shape": (m, n)
-        }
 class ReConstruction:
     '''
     '''
@@ -252,7 +94,6 @@ class ReConstruction:
                  det_size: np.ndarray,  #shape: [2,]
                  pixel_size: np.ndarray,  #shape: [2,]
                  fan_angle: np.float32,
-                 slit_corners: list,  # shape: [8, 3]
                  E: np.ndarray,  # shape: [e,]
                  prob: np.ndarray,  # shape: [e,]
                  rho: np.ndarray  # shape: ?
@@ -265,59 +106,59 @@ class ReConstruction:
         self.pixelsize = pixel_size
         self.detnormal, self.det = DetArray(det_corners, self.pixelsize, self.detsize)  # 按行排序，右下角为起点
         self.fan = np.deg2rad(fan_angle)
-        self.slit = slit_corners
         self.E = E
         self.prob = prob / np.sum(prob)
         self.rho = rho
     
     def Emit(self):
-        # SOD = self.obj_origin[2] - self.src[2]
-        # slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
-        # ny = int(2 * np.ceil(slice_halfy / self.voxelsize[1]))
-        # nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
-        # obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
-        # self.ny, self.nz = ny, nz
-        # #------------------ slice sample ------------------#
-        # y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
-        # z_start = SOD + self.voxelsize[2] / 2
-        # y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
-        # z_centers = [(z_start + i * self.voxelsize[2]) for i in range(nz)]
-        # Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
-        # X = np.zeros_like(Y)
-        # self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
-        # #------------------ slice sample ------------------#
-        # # self.emit_data = Inc.incident_vector_calulate(SOD,
-        # #                                         obj_slice_size,
-        # #                                         ny,
-        # #                                         nz,
-        # #                                         self.fan, 
-        # #                                         ray_step=np.deg2rad(12),
-        # #                                         voxels_size=self.voxelsize)
+        SOD = np.abs(self.obj_origin[2] - self.src[2])
+        slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
+        ny = int(2 * np.ceil((slice_halfy - self.voxelsize[1]/2) / self.voxelsize[1])) + 1
+        nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
+        obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
+        self.ny, self.nz = ny, nz
+        #------------------ slice sample ------------------#
+        vec = int(self.obj_origin[2] > 0)
+        y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
+        z_start = vec * (SOD + self.voxelsize[2] / 2)
+        y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
+        z_centers = [(z_start + i * vec * self.voxelsize[2]) for i in range(nz)]
+        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+        X = np.zeros_like(Y)
+        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        #------------------ slice sample ------------------#
+        self.emit_data = Inc.incident_vector_calulate(SOD,
+                                                obj_slice_size,
+                                                ny,
+                                                nz,
+                                                self.fan, 
+                                                ray_step=np.deg2rad(12),
+                                                voxels_size=self.voxelsize)
 
 
         #------------------ test-- 1 ray ------------------#
-        ny = 1
-        nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
-        self.ny, self.nz = ny, nz   
-        SOD = self.obj_origin[2] - self.src[2]
-        z_start = SOD + self.voxelsize[2] / 2
-        y_centers = [0]*ny
-        z_centers = [(z_start - i * self.voxelsize[2]) for i in range(nz)]    # 物体在z负方向
-        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
-        X = np.zeros_like(Y)             
-        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
-        m_ptr = np.arange(nz + 1)
-        p_idx = np.zeros((nz,))
-        vec = np.zeros((nz, 3))
-        vec[:, 2] = 1
-        data = np.ones((nz,))
-        self.emit_data = {
-            "m_ptr": m_ptr,
-            "p_idx": p_idx.astype(np.int32),
-            "data": data.astype(np.float64),
-            "vec": vec.astype(np.float64),
-            "shape": (1, nz)
-        }
+        # ny = 1
+        # nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
+        # self.ny, self.nz = ny, nz   
+        # SOD = np.abs(self.obj_origin[2] - self.src[2])
+        # z_start = SOD + self.voxelsize[2] / 2
+        # y_centers = [0]*ny
+        # z_centers = [(z_start - i * self.voxelsize[2]) for i in range(nz)]    # 物体在z负方向
+        # Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+        # X = np.zeros_like(Y)             
+        # self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        # m_ptr = np.arange(nz + 1)
+        # p_idx = np.zeros((nz,))
+        # vec = np.zeros((nz, 3))
+        # vec[:, 2] = 1
+        # data = np.ones((nz,))
+        # self.emit_data = {
+        #     "m_ptr": m_ptr,
+        #     "p_idx": p_idx.astype(np.int32),
+        #     "data": data.astype(np.float64),
+        #     "vec": vec.astype(np.float64),
+        #     "shape": (1, nz)
+        # }
         #------------------ test-- 1 ray ------------------#
 
     def Scatter(self):
@@ -351,21 +192,21 @@ class ReConstruction:
         #------------------ calculate solid angle and decay ------------------#
  
     def ScatterM(self):
-        # inl = InL.CalIntersectionLength(path="./Reconstruction/Vertex.yaml")
-        # self.scatter_data = inl.through_slit(obj_array=self.obj_slice, det_array=self.det, threshold=1000, save=True)
-        m_ptr = np.load("./data/scatter_mptr.npy")
-        n_idx = np.load("./data/scatter_nidx.npy")
-        l = np.load("./data/scatter_l.npy")
-        m_idx = np.load("./data/scatter_midx.npy")
-        vec = np.load("./data/scatter_vec.npy")
-        self.scatter_data = {
-            "m_ptr": m_ptr,
-            "vec": vec,
-            "data": l,
-            "m_idx": m_idx,
-            "n_idx": n_idx,
-            "shape": (700, 250000)
-        }
+        inl = InL.CalIntersectionLength(path="./Reconstruction/Vertex.yaml")
+        self.scatter_data = inl.through_slit(obj_array=self.obj_slice, det_array=self.det, threshold=1000, save=False)
+        # m_ptr = np.load("./data/scatter_mptr.npy")
+        # n_idx = np.load("./data/scatter_nidx.npy")
+        # l = np.load("./data/scatter_l.npy")
+        # m_idx = np.load("./data/scatter_midx.npy")
+        # vec = np.load("./data/scatter_vec.npy")
+        # self.scatter_data = {
+        #     "m_ptr": m_ptr,
+        #     "vec": vec,
+        #     "data": l,
+        #     "m_idx": m_idx,
+        #     "n_idx": n_idx,
+        #     "shape": (700, 250000)
+        # }
         #------------------ calculate solid angle and decay ------------------#
         vec = self.scatter_data["vec"]
         start = self.obj_slice[self.scatter_data["m_idx"]]
@@ -374,6 +215,9 @@ class ReConstruction:
         
         cos_phi = np.linalg.norm(vec - np.dot(vec, self.detnormal)[:, None] * self.detnormal)
         solid_angle = self.pixelsize[0]*self.pixelsize[1] * cos_phi / r
+        
+        
+        
         self.scatter_data["data"] = solid_angle * self.scatter_data["data"]
         #------------------ calculate solid angle and decay ------------------#
  
