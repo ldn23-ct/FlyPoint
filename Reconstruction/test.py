@@ -92,7 +92,8 @@ class ReConstruction:
                  voxelsize: np.ndarray,  #shape: [3,]
                  det_corners: np.ndarray,  #shape: [4, 3]  points in order
                  det_size: np.ndarray,  #shape: [2,]
-                 pixel_size: np.ndarray,  #shape: [2,]
+                 pixel_sizeL: np.ndarray,  #shape: [2,]
+                 pixel_sizeS: np.ndarray,  #shape:[2,]
                  fan_angle: np.float32,
                  E: np.ndarray,  # shape: [e,]
                  prob: np.ndarray,  # shape: [e,]
@@ -103,62 +104,65 @@ class ReConstruction:
         self.objsize = obj_size
         self.voxelsize = voxelsize
         self.detsize = det_size
-        self.pixelsize = pixel_size
-        self.detnormal, self.det = DetArray(det_corners, self.pixelsize, self.detsize)  # 按行排序，右下角为起点
+        self.pixelsizeL = pixel_sizeL
+        self.pixelsizeS = pixel_sizeS
+        self.detcorners = det_corners
+        # self.detnormal, self.det = DetArray(det_corners, self.pixelsize, self.detsize)  # 按行排序，右下角为起点
         self.fan = np.deg2rad(fan_angle)
         self.E = E
         self.prob = prob / np.sum(prob)
         self.rho = rho
     
     def Emit(self):
-        SOD = np.abs(self.obj_origin[2] - self.src[2])
-        slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
-        ny = int(2 * np.ceil((slice_halfy - self.voxelsize[1]/2) / self.voxelsize[1])) + 1
-        nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
-        obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
-        self.ny, self.nz = ny, nz
-        #------------------ slice sample ------------------#
-        vec = int(self.obj_origin[2] > 0)
-        y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
-        z_start = vec * (SOD + self.voxelsize[2] / 2)
-        y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
-        z_centers = [(z_start + i * vec * self.voxelsize[2]) for i in range(nz)]
-        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
-        X = np.zeros_like(Y)
-        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
-        #------------------ slice sample ------------------#
-        self.emit_data = Inc.incident_vector_calulate(SOD,
-                                                obj_slice_size,
-                                                ny,
-                                                nz,
-                                                self.fan, 
-                                                ray_step=np.deg2rad(12),
-                                                voxels_size=self.voxelsize)
+        # SOD = np.abs(self.obj_origin[2] - self.src[2])
+        # slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
+        # ny = int(2 * np.ceil((slice_halfy - self.voxelsize[1]/2) / self.voxelsize[1])) + 1
+        # nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
+        # obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
+        # self.ny, self.nz = ny, nz
+        # #------------------ slice sample ------------------#
+        # vec = -1  #  物体从负方向开始
+        # y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
+        # z_start = vec * (SOD + self.voxelsize[2] / 2)
+        # y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
+        # z_centers = [(z_start + i * vec * self.voxelsize[2]) for i in range(nz)]
+        # Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+        # X = np.zeros_like(Y)
+        # self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        # #------------------ slice sample ------------------#
+        # self.emit_data = Inc.incident_vector_calulate(SOD,
+        #                                         obj_slice_size,
+        #                                         ny,
+        #                                         nz,
+        #                                         self.fan, 
+        #                                         ray_step=np.deg2rad(12),
+        #                                         voxels_size=self.voxelsize)
 
 
         #------------------ test-- 1 ray ------------------#
-        # ny = 1
-        # nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
-        # self.ny, self.nz = ny, nz   
-        # SOD = np.abs(self.obj_origin[2] - self.src[2])
-        # z_start = SOD + self.voxelsize[2] / 2
-        # y_centers = [0]*ny
-        # z_centers = [(z_start - i * self.voxelsize[2]) for i in range(nz)]    # 物体在z负方向
-        # Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
-        # X = np.zeros_like(Y)             
-        # self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
-        # m_ptr = np.arange(nz + 1)
-        # p_idx = np.zeros((nz,))
-        # vec = np.zeros((nz, 3))
-        # vec[:, 2] = 1
-        # data = np.ones((nz,))
-        # self.emit_data = {
-        #     "m_ptr": m_ptr,
-        #     "p_idx": p_idx.astype(np.int32),
-        #     "data": data.astype(np.float64),
-        #     "vec": vec.astype(np.float64),
-        #     "shape": (1, nz)
-        # }
+        ny = 1
+        nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
+        self.ny, self.nz = ny, nz   
+        SOD = np.abs(self.obj_origin[2] - self.src[2])
+        vec = -1
+        z_start = (SOD + self.voxelsize[2] / 2) * vec
+        y_centers = [0]*ny
+        z_centers = [(z_start - i * self.voxelsize[2]) for i in range(nz)]    # 物体在z负方向
+        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+        X = np.zeros_like(Y)             
+        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        p_ptr = np.array([0, nz])
+        m_idx = np.arange(nz)
+        vec = np.zeros((nz, 3))
+        vec[:, 2] = 1
+        data = np.ones((nz,))
+        self.emit_data = {
+            "p_ptr": p_ptr,
+            "m_idx": m_idx.astype(np.int32),
+            "data": data.astype(np.float64),
+            "vec": vec.astype(np.float64),
+            "shape": (1, nz)
+        }
         #------------------ test-- 1 ray ------------------#
 
     def Scatter(self):
@@ -192,33 +196,27 @@ class ReConstruction:
         #------------------ calculate solid angle and decay ------------------#
  
     def ScatterM(self):
-        inl = InL.CalIntersectionLength(path="./Reconstruction/Vertex.yaml")
-        self.scatter_data = inl.through_slit(obj_array=self.obj_slice, det_array=self.det, threshold=1000, save=False)
-        # m_ptr = np.load("./data/scatter_mptr.npy")
-        # n_idx = np.load("./data/scatter_nidx.npy")
-        # l = np.load("./data/scatter_l.npy")
-        # m_idx = np.load("./data/scatter_midx.npy")
-        # vec = np.load("./data/scatter_vec.npy")
-        # self.scatter_data = {
-        #     "m_ptr": m_ptr,
-        #     "vec": vec,
-        #     "data": l,
-        #     "m_idx": m_idx,
-        #     "n_idx": n_idx,
-        #     "shape": (700, 250000)
-        # }
+        # inl = InL.CalIntersectionLength(path="./Reconstruction/Vertex.yaml")
+        # _, detS = DetArray(self.detcorners, self.pixelsizeS, self.detsize)
+        # self.scatter_data = inl.through_slit(obj_array=self.obj_slice,
+        #                                      det_array=detS,
+        #                                      scale = int(self.pixelsizeL[0] / self.pixelsizeS[0]),
+        #                                      threshold=1000,
+        #                                      save=True)  # [m, n] [7e3, 2.5e3]
+        self.scatter_data = np.load("./data/scatter_data.npy")
         #------------------ calculate solid angle and decay ------------------#
-        vec = self.scatter_data["vec"]
-        start = self.obj_slice[self.scatter_data["m_idx"]]
-        end = self.det[self.scatter_data["n_idx"]]
-        r = np.linalg.norm(start - end, axis=1)
+        det_normal, self.detL = DetArray(self.detcorners, self.pixelsizeL, self.detsize)
+        x, y = np.arange(self.obj_slice.shape[0]), np.arange(self.detL.shape[0])
+        m_idx, n_idx = np.meshgrid(x, y, indexing='ij')
+        start = self.obj_slice[m_idx]
+        end = self.detL[n_idx]
+        vec = (end - start).reshape(-1, 3)
+        r = np.linalg.norm(vec, axis=1)
+        self.scatter_vec = (vec / r[:, None]).reshape((self.obj_slice.shape[0], self.detL.shape[0], 3))
         
-        cos_phi = np.linalg.norm(vec - np.dot(vec, self.detnormal)[:, None] * self.detnormal)
-        solid_angle = self.pixelsize[0]*self.pixelsize[1] * cos_phi / r
-        
-        
-        
-        self.scatter_data["data"] = solid_angle * self.scatter_data["data"]
+        cos_phi = np.linalg.norm(vec - np.dot(vec, det_normal)[:, None] * det_normal)
+        solid_angle = self.pixelsizeL[0]*self.pixelsizeL[1] * cos_phi / r
+        self.scatter_data = (solid_angle * self.scatter_data).reshape((self.obj_slice.shape[0], self.detL.shape[0]))
         #------------------ calculate solid angle and decay ------------------#
  
     def klein_nishina(self, mu):
@@ -255,82 +253,47 @@ class ReConstruction:
         dsdo = np.sum(dsdo * prob[:, None], axis=0)
         return dsdo * 100
         
-    def Cal_SysMatrix(self, ifsave=True):
-        #------------------ find nozero-vectors ------------------#
-        A_ptr = self.emit_data["m_ptr"]; Ap_idx = self.emit_data["p_idx"]
+    def Cal_SysMatrix(self, save=True):
+        A_ptr = self.emit_data["p_ptr"]; Am_idx = self.emit_data["m_idx"]
         A_data = self.emit_data["data"]; A_vec = self.emit_data["vec"]
-        B_ptr = self.scatter_data["m_ptr"]; Bn_idx = self.scatter_data["n_idx"]; 
-        B_vec = self.scatter_data["vec"]; B_data = self.scatter_data["data"]
-        A_shape = self.emit_data["shape"]; B_shape = self.scatter_data["shape"]
-        M = A_shape[1]
-        assert B_shape[0] == M
+        P = A_ptr.shape[0] - 1
+        M = self.emit_data["shape"][1]
+        N = self.detL.shape[0]
         
-        cos_theta, m_idx, p_idx, n_idx, coeffi = [], [], [], [], []
-        num = 0
-        for m in tqdm(range(M)):
-            a0, a1 = A_ptr[m], A_ptr[m+1]
-            b0, b1 = B_ptr[m], B_ptr[m+1]
-            if a0 == a1 or b0 == b1: continue
-            p_sub, n_sub = Ap_idx[a0:a1], Bn_idx[b0:b1]
-            emit_vec, emit_data = A_vec[a0:a1], A_data[a0:a1][:, None]
-            scatter_vec, scatter_data = B_vec[b0:b1], B_data[b0:b1][:, None]
-            
-            num += p_sub.shape[0]*n_sub.shape[0]
-            #---------------kn项余弦---------------#
-            costheta = (emit_vec @ scatter_vec.T).ravel()  # shape: [a*b,]
+        for p in tqdm(range(P)):
+            sys_matrix_p = np.zeros((M, N))
+            al, ar = A_ptr[p], A_ptr[p+1]
+            m_idx = Am_idx[al:ar]
+            emit_vec, emit_data = A_vec[al:ar], A_data[al:ar]  # [m_p, 3]  [m_p,]
+            # scatter_vec, scatter_data
+            scatter_vec = self.scatter_vec[m_idx, :, :]  # [m_p, 2.5e3, 3]
+            costheta = np.einsum('mc, mnc->mn', emit_vec, scatter_vec)  # [m_p, 2.5e3]
             np.clip(costheta, -1.0, 1.0, out=costheta)
-            cos_theta.append(costheta)
-            #---------------kn项余弦---------------#
             
-            #---------------入/出射衰减及立体角---------------#
-            k = (emit_data @ scatter_data.T).ravel()  # shape: [a*b,]
-            coeffi.append(k)
-            #---------------入/出射衰减及立体角---------------#
-            
-            #---------------索引网格重组---------------#
-            # m_ptr[m + 1] = costheta.shape[0]
-            ps, ns = np.meshgrid(p_sub, n_sub, indexing='ij')
-            pss, nss = ps.ravel(), ns.ravel()
-            m_idx.append([m]*pss.shape[0])
-            p_idx.append(pss)
-            n_idx.append(nss)
-            #---------------索引网格重组---------------#
-        
-        cos_theta = np.hstack(cos_theta)
-        coeffi = np.hstack(coeffi)
-        m_idx = np.hstack(m_idx)
-        p_idx = np.hstack(p_idx)
-        n_idx = np.hstack(n_idx)
-        # kn项，需要结合物体电子密度计算
-        kn = self.klein_nishina(cos_theta)
-        coeffi = coeffi * kn
-        
-        # 不同p之间进行合并
-        sys_matrix = np.zeros(B_shape)
-        m_idx, n_idx = m_idx.astype(np.int32), n_idx.astype(np.int32)
-        for i in tqdm(range(coeffi.shape[0])):
-            sys_matrix[m_idx[i], n_idx[i]] += coeffi[i] 
-        # sys_matrix = sys_matrix / np.linalg.norm(sys_matrix)  [m, n] --> sum: [n,] --> [m, n] / [:, n]
-        # 归一化似乎有问题，不是矩阵模，而是第mi个体素对ni分量除以总体素对ni分量
-        sys_matrix = sys_matrix / np.sum(sys_matrix, axis=0)[None, :]
-        
-        if ifsave: 
-            np.save("sys_matrix_decay0.npy", sys_matrix)
-        return sys_matrix
+            scatter_data = self.scatter_data[m_idx, :]  # [m_p, 2.5e3]
+            coffei = emit_data[:, None] * scatter_data
+
+            kn = self.klein_nishina(costheta.ravel()).reshape((m_idx.shape[0], N))
+            coffei = coffei * kn  # [m_p, 2.5e3]
+            coffei = coffei / np.sum(coffei, axis=0)[None, :]
+            for i in range(coffei.shape[0]):
+                sys_matrix_p[m_idx[i], :] = coffei[i, :]
+
+            if save:
+                np.save(f"./sys_matrix/{p:03d}.npy", sys_matrix_p)
             
     def BackProjection(self, sys_matrix: np.ndarray, det_response: np.ndarray):
         '''
         sys_matrix: shape [m, n]
         det_response: shape [n,]
         '''
-        result = np.sum(sys_matrix * det_response[None, :], axis=1).reshape((self.ny, self.nz))
-        # plt.imshow(result, cmap="gray", vmin=np.min(result), vmax=np.max(result), aspect='auto')
+        result = np.sum(sys_matrix * det_response[None, :], axis=1)
+        plt.imshow(result, cmap="gray", vmin=np.min(result), vmax=np.max(result), aspect='auto')
         
-        result = np.sum(result, axis=0)
-        x =  np.arange(result.shape[0])
-        plt.plot(x, result)
+        # result = np.sum(result, axis=0)
+        # x =  np.arange(result.shape[0])
+        # plt.plot(x, result)
         plt.show()
-            
             
 
 if __name__ == "__main__":
@@ -340,34 +303,35 @@ if __name__ == "__main__":
     fan = 12
     voxelsize = np.array([5, 5, 0.1])
     det_size = np.array([50, 50])
-    pixelsize = np.array([0.1, 0.1])
+    pixelsizeS = np.array([0.1, 0.1])
+    pixelsizeL = np.array([1, 1])
     det_corners = [[-58.19, 25, 52.51], [-58.19, -25, 52.51], [-90.33, -25, 14.2], [-90.33, 25, 14.2]]
     slitcorners = np.array([[-27.65, 25, 194.59], [-27.65, -25, 194.59], [-28.3, -25, 195.35], [-28.3, 25, 195.35],
                    [-27.95, 25, 193.7], [-27.95, -25, 193.7], [-28.91, -25, 194.85], [-28.91, 25, 194.85]])
     E = np.array([160])
     prob = np.array([1])
     rho = 1
-    # detResponse = np.load("./Reconstruction/simulated_detector_image.npy")
+    detResponse = np.load("./simulated_detector_image.npy")
     # detResponse = zoom(detResponse, zoom=10, order=3)
-    detResponse = np.ones((500, 500))
+    # detResponse = np.ones((500, 500))
     # detResponse = np.zeros((50, 50))
     # detResponse[25:30, :] = 1
     # plt.imshow(detResponse, cmap="gray", vmin=np.min(detResponse), vmax=np.max(detResponse), aspect='auto')
     # plt.show()
     detResponse = detResponse.ravel()
     
-    tool = ReConstruction(src,
-                          obj_origin,
-                          objsize,
-                          voxelsize,
-                          det_corners,
-                          det_size,
-                          pixelsize,
-                          fan,
-                          slitcorners,
-                          E,
-                          prob,
-                          rho)
+    tool = ReConstruction(src_pos=src,
+                          grid_origin=obj_origin,
+                          obj_size=objsize,
+                          voxelsize=voxelsize,
+                          det_corners=det_corners,
+                          det_size=det_size,
+                          pixel_sizeL=pixelsizeL,
+                          pixel_sizeS=pixelsizeS,
+                          fan_angle=fan,
+                          E=E,
+                          prob=prob,
+                          rho=rho)
     
     tool.Emit()
     # tool.Scatter()
@@ -382,53 +346,20 @@ if __name__ == "__main__":
     #------------------ test emit ------------------#
     
     #------------------ test through_slit ------------------#
-    # m_ptr = tool.scatter_data["m_ptr"]
-    # n_idx = tool.scatter_data["n_idx"]
-    # l = tool.scatter_data["l"]
-    # M, N = tool.scatter_data["shape"]
-    # M, N = 700, 250000
-    # m_ptr = np.load("./data/scatter_mptr.npy")
-    # n_idx = np.load("./data/scatter_nidx.npy")
-    # l = np.load("./data/scatter_l.npy")
-    # value = np.sum(l.reshape((M, N)), axis=1)
-    # x = np.arange(M)
-    # plt.plot(x, value)
-    # plt.show()
-    # proj = l.reshape((M, N))
-    # for i in range(650, 660):
-    #     proj_i = proj[i].reshape((500, 500))
+    # print(scatter_data.shape)
+    # proj = tool.scatter_data.reshape(700, 2500)
+    # for i in range(350, 360):
+    #     proj_i = proj[i].reshape((50, 50))
     #     plt.imshow(proj_i, cmap='gray', aspect='auto')
-    #     plt.show()
-
-    # m_proj = np.zeros((M,))
-    # for i in range(M):
-    #     l, r = m_ptr[i], m_ptr[i+1]
-    #     m_proj[i] = r - l
-    # x = np.arange(M)
-    # plt.plot(x, m_proj)
-    # plt.show()
-              
-            
-    # for i in range(108, 110):
-    #     l, r = int(m_ptr[i]), int(m_ptr[i+1])
-    #     # print(l-r)
-    #     n_is = n_idx[l:r] 
-    #     det_response = np.zeros((500, 500))
-    #     for j in range(n_is.shape[0]):
-    #         n = n_is[j]
-    #         n_x = int(n / 500)
-    #         n_y = int(n % 500)
-    #         det_response[n_x, n_y] += 1
-    #     plt.imshow(det_response, cmap='gray', aspect='auto')
     #     plt.show()
     #------------------ test through_slit ------------------#
     
     #------------------ test sysmatrix ------------------#
-    sys = tool.Cal_SysMatrix()
-    # sys = np.load("./sys_matrix_decay0.npy")
+    tool.Cal_SysMatrix()
+    sys = np.load("./sys_matrix/{p}.npy")
     # print(sys.shape)
-    # for i in range(150, 160):
-    #     proj_i = sys[i].reshape((500, 500))
+    # for i in range(350, 360):
+    #     proj_i = sys[i].reshape((50, 50))
     #     plt.imshow(proj_i, cmap='gray', aspect='auto')
     #     plt.show()
     tool.BackProjection(sys, detResponse)

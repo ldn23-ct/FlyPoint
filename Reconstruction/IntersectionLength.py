@@ -149,13 +149,15 @@ class CalIntersectionLength:
         # 需要 [k,n]
         return lengths_nk.T  # (k,n)
 
-    def through_slit(self, obj_array: np.ndarray, det_array: np.ndarray, threshold, save=False):
+    def through_slit(self, obj_array: np.ndarray, det_array: np.ndarray, scale: int, threshold, save=False):
         '''
         计算每个体素点到探测器点的狭缝穿过情况
         obj_array: [m, 3]
         det_array: [n, 3]
         '''
         m, n = obj_array.shape[0], det_array.shape[0]
+        detxS = int(np.sqrt(n))
+        detxL = int(detxS / scale)
         cnt = 0
         m_ptr = np.zeros((m + 1,))
         m_idx, n_idx, vec, attenuation = [], [], [], []
@@ -163,46 +165,54 @@ class CalIntersectionLength:
             src = obj_array[i]
             l = self.calLength(src=src, ends=det_array, normals=self.ns, centers=self.cs)  # [k, n]
             attenuation_i = np.exp(-1 * np.sum(self.mus[:, None] * l, axis=0))  # [n,]
-            idx = np.where(attenuation_i < threshold)[0]
-            m_idx.extend([i]*idx.shape[0])
-            n_idx.extend(idx)
-            cnt += idx.shape[0]
-            m_ptr[i + 1] = cnt
-            vec_i = det_array - src[None, :]
-            vec.append(vec_i)
-            attenuation.append(attenuation_i)
-        m_ptr = np.array(m_ptr, dtype=np.int32)
-        m_idx = np.array(m_idx, dtype=np.int32)
-        n_idx = np.array(n_idx, dtype=np.int32)
-        vec = np.array(vec, dtype=np.float32).reshape((-1, 3))
-        attenuation = np.array(attenuation, dtype=np.float32).flatten()
+            # 按0.1mm 划分，现在进行聚合
+            if not attenuation_i.flags['C_CONTIGUOUS']:
+                attenuation_i = np.ascontiguousarray(attenuation_i)
+            attenuation_i_group = (attenuation_i.reshape(detxL, scale, detxL, scale).sum(axis=(1, 3))).flatten()  # [2.5e3]
+            attenuation.append(attenuation_i_group)
+            # idx = np.where(attenuation_i < threshold)[0]
+            # m_idx.extend([i]*idx.shape[0])
+            # n_idx.extend(idx)
+            # cnt += idx.shape[0]
+            # m_ptr[i + 1] = cnt
+            # vec_i = det_array - src[None, :]
+            # vec.append(vec_i)
+            # attenuation.append(attenuation_i)
+        # m_ptr = np.array(m_ptr, dtype=np.int32)
+        # m_idx = np.array(m_idx, dtype=np.int32)
+        # n_idx = np.array(n_idx, dtype=np.int32)
+        # vec = np.array(vec, dtype=np.float32).reshape((-1, 3))
+        # attenuation = np.array(attenuation, dtype=np.float32).flatten()
+        attenuation = np.array(attenuation, dtype=np.float64).flatten()
         if save:
-            np.save("./data/scatter_mptr.npy", m_ptr)
-            np.save("./data/scatter_nidx.npy", n_idx)
+            # np.save("./data/scatter_mptr.npy", m_ptr)
+            # np.save("./data/scatter_nidx.npy", n_idx)
             np.save("./data/scatter_data.npy", attenuation)
-            np.save("./data/scatter_vec.npy", vec)
-            np.save("./data/scatter_midx.npy", m_idx)
-        return {
-            "m_ptr": m_ptr,
-            "vec": vec,
-            "data": attenuation,
-            "m_idx": m_idx,
-            "n_idx": n_idx,
-            "shape": (m, n)
-        } 
+            # np.save("./data/scatter_vec.npy", vec)
+            # np.save("./data/scatter_midx.npy", m_idx)
+        return attenuation
+        # return {
+        #     "m_ptr": m_ptr,
+        #     "vec": vec,
+        #     "data": attenuation,
+        #     "m_idx": m_idx,
+        #     "n_idx": n_idx,
+        #     "shape": (m, n)
+        # } 
                      
-
 if __name__ == "__main__":
     tool = CalIntersectionLength(path="./Reconstruction/Vertex.yaml")
     srcs = np.array([
-        [-10.0,  5.0,  7.5],   # src0
-        [ 25.0,  5.0,  7.5],   # src1
+        [0, 0, -60],
+        [0, 0, -85],
+        [0, 0, -100]
     ])
+    
 
-    ends = np.array([
-        [30.0,   5.0,  7.5],   # end0
-        [10.0,   5.0,  7.5],   # end1
-        [60.0,   5.0,  7.5],   # end2
-    ])
-    data = tool.through_slit(obj_array=srcs, det_array=ends, threshold=1000)
-    print(data["l"])
+    # A = np.zeros((100, 100), dtype=int)
+
+    # for i in range(10):       # 行方向子块索引
+    #     for j in range(10):   # 列方向子块索引
+    #         idx = i * 10 + j + 1  # 当前子块编号（1~100）
+    #         A[i*10:(i+1)*10, j*10:(j+1)*10] = idx
+    # A.flatten()
