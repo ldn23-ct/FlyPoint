@@ -122,9 +122,15 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     data_mirror = np.flip(data_half, axis=1)  # 翻转 y 方向
 
     # # 去掉 p=0 的第一行
-    data_pos = data_half[1:, :, :]     # shape (nray-1, ny-1, nz)
+    data_mirror = data_mirror[1:, :, :]     # shape (nray-1, ny-1, nz)
+    data_mirror = np.flip(data_mirror, axis=0)  # 翻转 p 方向
     # 拼接：先镜像部分(y<0)，再原部分(y>=0)
-    data_full = np.concatenate([data_mirror, data_pos], axis=0)
+    data_full = np.concatenate([data_mirror, data_half], axis=0)
+
+    # plt.imshow(data_full[3,:,:],cmap='hot', interpolation='nearest')
+    # plt.colorbar()
+    # plt.show()
+
     ny = 2 * ny - 1 #odd
     # ny = 2 * ny   #even
     nray = 2 * nray - 1 #odd
@@ -429,11 +435,11 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
 
 def main():
     distance_of_source2object=5
-    object_size=[4,4]
-    ny=4
-    nz=4
-    ray_angle=5*np.pi/180
-    ray_step=5*np.pi/180
+    object_size=[40,40]
+    ny=40
+    nz=40
+    ray_angle=90*np.pi/180
+    ray_step=15*np.pi/180
     voxels_size=[1,1,1]
     attenuation = 50
     grid_origin = np.array([40, -100, 0])
