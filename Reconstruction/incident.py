@@ -26,8 +26,8 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     nray = math.floor(ray_angle / ray_step) + 1
     # ny = math.floor(object_size[1] / voxels_size[0]) + 1
     # nz = math.floor(object_size[0] / voxels_size) + 1
-    # ny = math.floor(ny * 0.5) + 1
-    ny = math.floor(ny * 0.5)
+    ny = math.floor(ny * 0.5) + 1
+    # ny = math.floor(ny * 0.5)
     obj_y,obj_z = object_size
     data = np.zeros((nray,ny,nz))
 
@@ -113,40 +113,57 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
                 break
 
     # # 去掉 y=0 的第一行
-    # vector_pos = vector[:, 1:, :, :]     # shape (nray, ny-1, nz, 3)
+    data_pos = data[:, 1:, :, :]     # shape (nray, ny-1, nz, 3)
 
+    # data_pos = data
     # 沿 y 维度翻转
-    data_mirror = np.flip(data, axis=1)  # 翻转 y 方向
+    data_mirror = np.flip(data_pos, axis=1)  # 翻转 y 方向
 
 
     # 拼接：先镜像部分(y<0)，再原部分(y>=0)
     data_full = np.concatenate([data_mirror, data], axis=1)
-    ny = 2 * ny
+    ny = 2 * ny - 1 #odd
+    # ny = 2 * ny   #even
     p,m_y,m_z = np.nonzero(data_full)
     data = data_full[p,m_y,m_z]
     m = nz * m_y + m_z
-    order = np.argsort(m)
     m_num = ny * nz
-    p_idx = p[order]
-    data = data[order]
-    m_ptr = np.zeros(m_num+1,dtype=np.int32)
-    m_unique, counts = np.unique(m, return_counts=True)   
-    m_cnts = np.zeros(m_num); ptr = np.zeros(m_num+1); sum = 0
-    for k in range(m_unique.shape[0]):
-        m_cnts[m_unique[k]] = counts[k]
-    for k in range(1, m_num+1):
-        sum += m_cnts[k-1]
-        m_ptr[k] = sum
+    p_num = len(p)
+    # order = np.argsort(m)
+    # p_idx = p[order]
+    # data = data[order]
+    # m_ptr = np.zeros(m_num+1,dtype=np.int32)
+    # m_unique, counts = np.unique(m, return_counts=True)   
+    # m_cnts = np.zeros(m_num); ptr = np.zeros(m_num+1); sum = 0
+    # for k in range(m_unique.shape[0]):
+    #     m_cnts[m_unique[k]] = counts[k]
+    # for k in range(1, m_num+1):
+    #     sum += m_cnts[k-1]
+    #     m_ptr[k] = sum
 
-    vec = np.tile(ray_vec, (len(p_idx), 1))
+    order = np.argsort(p)
+    m_idx = m[order]
+    data = data[order]
+    p_ptr = np.zeros(p_num+1,dtype=np.int32)
+    p_unique, counts = np.unique(p, return_counts=True)   
+    p_cnts = np.zeros(p_num);sum = 0
+    for k in range(p_unique.shape[0]):
+        p_cnts[p_unique[k]] = counts[k]
+    for k in range(1, p_num+1):
+        sum += p_cnts[k-1]
+        p_ptr[k] = sum
+
+    vec = np.tile(ray_vec, (len(m_idx), 1))
     vec[:,[0,2]] = vec[:,[2,0]]
 
     return {
-            "m_ptr": m_ptr,
-            "p_idx": p_idx.astype(np.int32, copy=False),
+            "p_ptr": p_ptr,
+            "m_idx": m_idx.astype(np.int32, copy=False),
+            # "m_ptr": p_ptr,
+            # "p_idx": m_idx.astype(np.int32, copy=False),
             "data": data.astype(np.float32, copy=False),
             "vec": vec.astype(np.float32, copy=False),
-            "shape": (nray, m_num)
+            "shape": (nray, m_num),
     }
 
     # return vector_full
@@ -423,5 +440,4 @@ def main():
     print("done")
 
 if __name__ == "__main__":
-
     main()

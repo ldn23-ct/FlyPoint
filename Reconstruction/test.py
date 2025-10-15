@@ -114,55 +114,58 @@ class ReConstruction:
         self.rho = rho
     
     def Emit(self):
-        # SOD = np.abs(self.obj_origin[2] - self.src[2])
-        # slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
-        # ny = int(2 * np.ceil((slice_halfy - self.voxelsize[1]/2) / self.voxelsize[1])) + 1
-        # nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
-        # obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
-        # self.ny, self.nz = ny, nz
-        # #------------------ slice sample ------------------#
-        # vec = -1  #  物体从负方向开始
-        # y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
-        # z_start = vec * (SOD + self.voxelsize[2] / 2)
-        # y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
-        # z_centers = [(z_start + i * vec * self.voxelsize[2]) for i in range(nz)]
-        # Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
-        # X = np.zeros_like(Y)
-        # self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
-        # #------------------ slice sample ------------------#
-        # self.emit_data = Inc.incident_vector_calulate(SOD,
-        #                                         obj_slice_size,
-        #                                         ny,
-        #                                         nz,
-        #                                         self.fan, 
-        #                                         ray_step=np.deg2rad(12),
-        #                                         voxels_size=self.voxelsize)
-
+        SOD = np.abs(self.obj_origin[2] - self.src[2])
+        slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
+        ny = int(2 * np.ceil((slice_halfy - self.voxelsize[1]/2) / self.voxelsize[1])) + 1
+        nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
+        obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
+        self.ny, self.nz = ny, nz
+        #------------------ slice sample ------------------#
+        vec = -1  #  物体从负方向开始
+        y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
+        z_start = self.obj_origin[2] + vec * self.voxelsize[2] / 2
+        y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
+        z_centers = [(z_start + i * vec * self.voxelsize[2]) for i in range(nz)]
+        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+        X = np.zeros_like(Y)
+        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        #------------------ slice sample ------------------#
+        self.emit_data = Inc.incident_vector_calulate(SOD,
+                                                obj_slice_size,
+                                                ny,
+                                                nz,
+                                                self.fan, 
+                                                ray_step=np.deg2rad(1),
+                                                voxels_size=self.voxelsize)
+        np.save("./data/emit_pptr.npy", self.emit_data["p_ptr"])
+        np.save("./data/emit_midx.npy", self.emit_data["m_idx"])
+        np.save("./data/emit_data.npy", self.emit_data["data"])
+        np.save("./data/emit_vec.npy", self.emit_data["vec"])
 
         #------------------ test-- 1 ray ------------------#
-        ny = 1
-        nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
-        self.ny, self.nz = ny, nz   
-        SOD = np.abs(self.obj_origin[2] - self.src[2])
-        vec = -1
-        z_start = (SOD + self.voxelsize[2] / 2) * vec
-        y_centers = [0]*ny
-        z_centers = [(z_start - i * self.voxelsize[2]) for i in range(nz)]    # 物体在z负方向
-        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
-        X = np.zeros_like(Y)             
-        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
-        p_ptr = np.array([0, nz])
-        m_idx = np.arange(nz)
-        vec = np.zeros((nz, 3))
-        vec[:, 2] = 1
-        data = np.ones((nz,))
-        self.emit_data = {
-            "p_ptr": p_ptr,
-            "m_idx": m_idx.astype(np.int32),
-            "data": data.astype(np.float64),
-            "vec": vec.astype(np.float64),
-            "shape": (1, nz)
-        }
+        # ny = 1
+        # nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
+        # self.ny, self.nz = ny, nz   
+        # SOD = np.abs(self.obj_origin[2] - self.src[2])
+        # vec = -1
+        # z_start = (SOD + self.voxelsize[2] / 2) * vec
+        # y_centers = [0]*ny
+        # z_centers = [(z_start - i * self.voxelsize[2]) for i in range(nz)]    # 物体在z负方向
+        # Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+        # X = np.zeros_like(Y)             
+        # self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        # p_ptr = np.array([0, nz])
+        # m_idx = np.arange(nz)
+        # vec = np.zeros((nz, 3))
+        # vec[:, 2] = 1
+        # data = np.ones((nz,))
+        # self.emit_data = {
+        #     "p_ptr": p_ptr,
+        #     "m_idx": m_idx.astype(np.int32),
+        #     "data": data.astype(np.float64),
+        #     "vec": vec.astype(np.float64),
+        #     "shape": (1, nz)
+        # }
         #------------------ test-- 1 ray ------------------#
 
     def Scatter(self):
@@ -297,10 +300,10 @@ class ReConstruction:
             
 
 if __name__ == "__main__":
-    src = np.array([0, 0, 0])
+    src = np.array([0, 0, 158])
     obj_origin = np.array([0, 0, -50])
     objsize = np.array([200, 200, 70])
-    fan = 12
+    fan = 15
     voxelsize = np.array([5, 5, 0.1])
     det_size = np.array([50, 50])
     pixelsizeS = np.array([0.1, 0.1])
@@ -335,7 +338,7 @@ if __name__ == "__main__":
     
     tool.Emit()
     # tool.Scatter()
-    tool.ScatterM()
+    # tool.ScatterM()
 
     #------------------ test emit ------------------#
     # print(tool.obj_slice.shape)
@@ -355,14 +358,14 @@ if __name__ == "__main__":
     #------------------ test through_slit ------------------#
     
     #------------------ test sysmatrix ------------------#
-    tool.Cal_SysMatrix()
-    sys = np.load("./sys_matrix/{p}.npy")
+    # tool.Cal_SysMatrix()
+    # sys = np.load("./sys_matrix/{p}.npy")
     # print(sys.shape)
     # for i in range(350, 360):
     #     proj_i = sys[i].reshape((50, 50))
     #     plt.imshow(proj_i, cmap='gray', aspect='auto')
     #     plt.show()
-    tool.BackProjection(sys, detResponse)
+    # tool.BackProjection(sys, detResponse)
     #------------------ test sysmatrix ------------------#
     
     
