@@ -96,9 +96,11 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
         delta_d = 0 
         intensity = 1
         for q in range(Np+1):
-            i12 = intensity * np.exp(-attenuation * d12)
-            data[p,j,i] = i12
+            # i12 = intensity * np.exp(-attenuation * d12)
+            # data[p,j,i] = i12
             if a_z < a_y:
+                i12 = intensity * np.exp(-attenuation * d12)
+                data[p,j,i] = i12
                 delta_d = (a_z - ac) * d_final * 0.001
                 d12 = d12 + delta_d
                 i = i + 1
@@ -127,9 +129,9 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     # 拼接：先镜像部分(y<0)，再原部分(y>=0)
     data_full = np.concatenate([data_mirror, data_half], axis=0)
 
-    # plt.imshow(data_full[3,:,:],cmap='hot', interpolation='nearest')
-    # plt.colorbar()
-    # plt.show()
+    plt.imshow(data_full[1,:,:],cmap='hot', interpolation='nearest')
+    plt.colorbar()
+    plt.show()
 
     ny = 2 * ny - 1 #odd
     # ny = 2 * ny   #even
