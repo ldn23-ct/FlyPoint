@@ -270,8 +270,12 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,miu =
         az = np.zeros(nz+1)
         ay = np.zeros(ny+1)
         ax = np.zeros(nx+1)
-        for i in range(nz+1):
-            az[i] = (grid_origin[0]+i*grid_z-soc[0]) / (final_vec[0] - soc[0] + eps)
+        if grid_origin[0]>0:
+            for i in range(nz+1):
+                az[i] = (grid_origin[0]+i*grid_z-soc[0]) / (final_vec[0] - soc[0] + eps)
+        else:
+            for i in range(nz+1):
+                az[i] = (grid_origin[0]-i*grid_z-soc[0]) / (final_vec[0] - soc[0] + eps)
         for j in range(ny+1):
             ay[j] = (grid_origin[1]+j*grid_y-soc[1]) / (final_vec[1] - soc[1] + eps)
         for k in range(nx+1):
@@ -371,20 +375,21 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,miu =
         k = first_k
         d12 = 0
         if ac >0:
-            d12 = d * ac
+            d12 = d * ac *  0.00001638 #air
         delta_d = 0 
         intensity = vec_intensity
         # for q in range(Np+1):
+        data = np.zeros((nx,ny,nz))#调试可视化用
         while True:
             # i12 = intensity * np.exp(-miu[k,j,i] * d12)
-            if d12 > 0:
+            if a_z < a_y and a_z < a_x:
+                i12 = intensity * np.exp(-d12)
+                data[k,j,i] = i12
                 nums.append(num_i)
                 zs.append(i)
                 ys.append(j)
                 xs.append(k)
                 vec_out_single.append(i12 * vec)
-            if a_z < a_y and a_z < a_x:
-                i12 = intensity * np.exp(-d12)
                 if ac >0:
                     delta_d = (a_z - ac) * d * miu[k,j,i]
                 else:
@@ -422,7 +427,10 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,miu =
         #     d12 = d * a_max * 0.001
         #     i12 = intensity * np.exp(-miu[k,j,i] * d12)
         #     vec_out_total.append(i12 * vec)
-
+        # data_show = np.sum(data, axis=2)
+        # plt.imshow(data_show, cmap='hot', interpolation='nearest')
+        # plt.colorbar()
+        # plt.show()
     if output_type == "single":
         vec_out = np.array(vec_out_single).astype(np.float32, copy=False)
         vec_out[[0,2]] = vec_out[[2,0]]
@@ -436,25 +444,26 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,miu =
     if output_type == "total":
         vec_out = np.array(vec_out_total).astype(np.float32, copy=False)
         vec_out[[0,2]] = vec_out[[2,0]]
-        data = np.linalg.norm(vec_out,axis=1,keepdims=True)
+        data = np.linalg.norm(vec_out,axis=1,keepdims=False)
         data = np.array(data, dtype=np.float32)
         return data
 
 def main():
     distance_of_source2object=5
-    object_size=[40,40]
+    object_size=np.array([40,40,40])
     ny=40
     nz=40
     ray_angle=90*np.pi/180
     ray_step=15*np.pi/180
-    voxels_size=[1,1,1]
-    attenuation = 0.068 * np.ones((ny,nz))
-    grid_origin = np.array([40, -100, 0])
+    voxels_size=np.array([1,1,1])
+    attenuation1 = 0.068 * np.ones((ny,nz))
+    attenuation2 = 0.034 * np.ones((ny,ny,nz))
+    grid_origin = np.array([-0.5 * object_size[0], -0.5 * object_size[1], distance_of_source2object])
     grid_size = np.array([1, 1, 1])
-    ray_start = np.array([[0,0,0],[0,10,0],[0,20,0],[0,30,0],[0,40,0],[0,50,0],[0,60,0],[0,70,0],[0,80,0],[0,90,0],[0,100,0]])
-    ray_end = np.array([[100,0,0],[100,10,0],[100,20,0],[100,30,0],[100,40,0],[100,50,0],[100,60,0],[100,70,0],[100,80,0],[100,90,0],[100,100,0]])
-    result = incident_vector_calulate(distance_of_source2object,object_size,ny,nz,ray_angle,ray_step,voxels_size,attenuation)
-    result2 = voxel_path_length_cal(grid_origin,grid_size,object_size,ray_start,ray_end,attenuation = 29.9,output_type="total")
+    ray_start = np.array([[0,0,0],[0,0,0],[0,0,25],[5,5,25]])
+    ray_end = np.array([[0,0,60],[-5,5,60],[5,-5,60],[-5,-5,0]])
+    result = incident_vector_calulate(distance_of_source2object,object_size[1:],ny,nz,ray_angle,ray_step,voxels_size,attenuation1)
+    result2 = voxel_path_length_cal(grid_origin,grid_size,object_size,ray_start,ray_end,attenuation2,output_type="total")
     print("done")
 
 if __name__ == "__main__":
