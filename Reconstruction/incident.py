@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import os
 eps = 1e-6
 
-def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],ny=200,nz=90,ray_angle=15*np.pi/180,ray_step=1*np.pi/180,voxels_size=[1,1,1],attenuation = 0.68):
+def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],ny=200,nz=90,ray_angle=15*np.pi/180,ray_step=1*np.pi/180,voxels_size=[1,1,1],miu=np.ones((200,90))):
     '''
     计算入射向量矩阵(每个元素的值代表对应角度，对应体素处的入射向量，向量方向为射线方向，大小为入射强度)
     input:
@@ -14,7 +14,7 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
         ray_angle: 射线角度范围的一半(偏离垂直入射的最大角度) 单位°
         ray_step: 射线角度步长 单位°
         voxels_size: 体素的大小[z,y,x] 单位mm
-        attenuation: 衰减系数
+        miu: 衰减系数[ny,nz] 单位 1/mm
     output:
         {
             "m_ptr": m_ptr,shape(ny*nz+1),体素指针 ny=j,nz=i 对应 m=nz*j+i
@@ -24,15 +24,15 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     '''
 
     nray = math.floor(ray_angle / ray_step) + 1
-    nray = math.floor(nray * 0.5) + 1
+    # nray = math.floor(nray * 0.5) + 1
     # ny = math.floor(object_size[1] / voxels_size[0]) + 1
     # nz = math.floor(object_size[0] / voxels_size) + 1
-    ny = math.floor(ny * 0.5) + 1
+    # ny = math.floor(ny * 0.5) + 1
     # ny = math.floor(ny * 0.5)
     obj_y,obj_z = object_size
     data = np.zeros((nray,ny,nz))
 
-    rays = np.linspace(0,ray_angle/2,nray)
+    rays = np.linspace(-ray_angle/2,ray_angle/2,nray)
 
     # voxel_size_y = obj_y / ny;
     # voxel_size_z = obj_z / nz;
@@ -40,15 +40,15 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     voxel_size_y = voxels_size[1]
     voxel_size_z = voxels_size[2]
     # grid_origin =np.array([distance_of_source2object, - 0.5 * voxel_size_y,0])
-    grid_origin =np.array([distance_of_source2object, 0 ,0])
+    grid_origin = np.array([distance_of_source2object, -0.5 * obj_y , 0])
     critical_angle = math.atan(0.5 * obj_y / distance_of_source2object)
     for p in range(len(rays)):
-        if rays[p] > critical_angle:
+        if math.fabs(rays[p]) > critical_angle:
             break
         ray_vec = np.array([np.cos(rays[p]),np.sin(rays[p]),0])
         d_final = distance_of_source2object + 0.5 * obj_y + obj_z
         final = ray_vec * d_final
-        if final[1] < 0.1:
+        if math.fabs(final[1]) < 0.1:
             final[1] = 0.1
         az = np.zeros(nz+1)
         ay = np.zeros(ny+1)
@@ -63,7 +63,6 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
 
         a_min = max(az_min,ay_min)
         a_max = min(az_max,ay_max)
-
         if a_min == az_min:
             i_min = 1
         else:
@@ -72,22 +71,36 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
             i_max = nz
         else:
             i_max = math.floor((a_max * final[0] - grid_origin[0]) / voxel_size_z)
-        if a_min == ay_min:
-            j_min = 1
-        else:
-            j_min = math.ceil((a_min * final[1] - grid_origin[1]) / voxel_size_y)
-        if a_max == ay_max:
-            j_max = ny
-        else:
-            j_max = math.floor((a_max * final[1] - grid_origin[1]) / voxel_size_y)
-
-        Np = i_max - i_min + j_max - j_min + 2
         a_z = az[i_min]
-        a_y = ay[j_min]
+        iu = 1
+        if ray_vec[1] >= 0:
+            if a_min == ay_min:
+                j_min = 1
+            else:
+                j_min = math.ceil((a_min * final[1] - grid_origin[1]) / voxel_size_y)
+            if a_max == ay_max:
+                j_max = ny
+            else:
+                j_max = math.floor((a_max * final[1] - grid_origin[1]) / voxel_size_y)
+            a_y = ay[j_min]
+            ju = 1
+        else:
+            if a_min == ay_min:
+                j_max = ny-1
+            else:
+                j_max = math.floor((a_min * final[1] - grid_origin[1]) / voxel_size_y)
+            if a_max == ay_max:
+                j_min = 0
+            else:
+                j_min = math.ceil((a_max * final[1] - grid_origin[1]) / voxel_size_y)
+            a_y = ay[j_max]
+            ju = -1
+        Np = i_max - i_min + j_max - j_min + 2
+
         first_i = math.floor((0.5 * (min(a_z,a_y) + a_min) * final[0] - grid_origin[0]) / voxel_size_z)
         first_j = math.floor((0.5 * (min(a_z,a_y) + a_min) * final[1] - grid_origin[1]) / voxel_size_y)
-        azu = voxel_size_z / final[0]
-        ayu = voxel_size_y / final[1]
+        azu = iu * voxel_size_z / final[0]
+        ayu = ju * voxel_size_y / final[1]
         ac = a_min
 
         i = first_i
@@ -96,38 +109,46 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
         delta_d = 0 
         intensity = 1
         for q in range(Np+1):
-            i12 = intensity * np.exp(-attenuation * d12)
-            data[p,j,i] = i12
+            # i12 = intensity * np.exp(-attenuation * d12)
+            # data[p,j,i] = i12
             if a_z < a_y:
-                delta_d = (a_z - ac) * d_final * 0.001
+                i12 = intensity * np.exp(-d12)
+                data[p,j,i] = i12
+                delta_d = (a_z - ac) * d_final * miu[j,i]
                 d12 = d12 + delta_d
-                i = i + 1
+                i = i + iu
                 ac = a_z
                 a_z = a_z + azu
             else:
-                delta_d = (a_y - ac) * d_final * 0.001
+                delta_d = (a_y - ac) * d_final * miu[j,i]
                 d12 = d12 + delta_d
-                j = j + 1
+                j = j + ju
                 ac = a_y
                 a_y = a_y + ayu
-            if i >= nz or j >= ny:
+            if i >= nz or j >= ny or j < 0 or ac < 0:
                 break
 
     # # 去掉 y=0 的第一行
     # data_pos = data[:, 1:, :]     # shape (nray, ny-1, nz)
-    data_zero = np.zeros((len(rays),ny-1,nz))
-    data_half = np.concatenate([data_zero, data], axis=1)
-    # data_pos = data
-    # 沿 y 维度翻转
-    data_mirror = np.flip(data_half, axis=1)  # 翻转 y 方向
+    # data_zero = np.zeros((len(rays),ny-1,nz))
+    # data_half = np.concatenate([data_zero, data], axis=1)
+    # # data_pos = data
+    # # 沿 y 维度翻转
+    # data_mirror = np.flip(data_half, axis=1)  # 翻转 y 方向
 
-    # # 去掉 p=0 的第一行
-    data_pos = data_half[1:, :, :]     # shape (nray-1, ny-1, nz)
-    # 拼接：先镜像部分(y<0)，再原部分(y>=0)
-    data_full = np.concatenate([data_mirror, data_pos], axis=0)
-    ny = 2 * ny - 1 #odd
-    # ny = 2 * ny   #even
-    nray = 2 * nray - 1 #odd
+    # # # 去掉 p=0 的第一行
+    # data_mirror = data_mirror[1:, :, :]     # shape (nray-1, ny-1, nz)
+    # data_mirror = np.flip(data_mirror, axis=0)  # 翻转 p 方向
+    # # 拼接：先镜像部分(y<0)，再原部分(y>=0)
+    # data_full = np.concatenate([data_mirror, data_half], axis=0)
+    data_full = data
+    # plt.imshow(data_full[4,:,:],cmap='hot', interpolation='nearest')
+    # plt.colorbar()
+    # plt.show()
+
+    # ny = 2 * ny - 1 #odd
+    # # ny = 2 * ny   #even
+    # nray = 2 * nray - 1 #odd
     # nray = 2 * nray   #even
     p,m_y,m_z = np.nonzero(data_full)
     data = data_full[p,m_y,m_z]
@@ -175,33 +196,22 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
 
 def voxel_center_calulate(distance_of_source2object=40,object_size=[20,90],voxels_size=1):
     '''
-    计算体素中心坐标并返回体素中心矩阵,shape(ny,nz,3)
+    计算体素中心坐标(x,y,z)并返回体素中心矩阵,shape(ny,nz,3)
     distance_of_source2object: 源到物体前表面的距离
     object_size: 物体的实际尺寸(x=y,z) 单位mm
     voxels_size: 体素的大小 单位mm
     '''
     ny = math.floor(object_size[1] / voxels_size) + 1
     nz = math.floor(object_size[0] / voxels_size) + 1   
-    ny = math.floor(ny * 0.5) + 1
     voxel_center = np.zeros((ny,nz,3))
 
     for i in range(ny):
         for j in range(nz):
-            voxel_center[i,j,:] = np.array([distance_of_source2object + i * voxels_size, j * voxels_size,0])       
-    # 去掉 y=0 的第一行
-    voxel_center_pos = voxel_center[:, 1:, :]     # shape (ny-1, nz, 3)
+            voxel_center[i,j,:] = np.array([0,- 0.5 * object_size[1] + i * voxels_size,distance_of_source2object + j * voxels_size]) #x,y,z
 
-    # 沿 y 维度翻转
-    voxel_center_mirror = np.flip(voxel_center_pos, axis=0)  # 翻转 y 方向
+    return voxel_center
 
-    # y 分量取负（索引2对应xyz中的y分量）
-    voxel_center_mirror[:, :, 1] *= -1
-
-    # 拼接：先镜像部分(y<0)，再原部分(y>=0)
-    voxel_center_full = np.concatenate([voxel_center_mirror, voxel_center], axis=0)
-    return voxel_center_full
-
-def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,attenuation = 29.9,output_type="total"):
+def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,miu = np.ones((40,40,40)),output_type="total"):
     '''
     计算体素路径长度
     input:
@@ -210,7 +220,7 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
     obj_size: 物体的大小 [x,y,z] 单位mm
     ray_start: 射线起始点 [x,y,z] 绝对坐标
     ray_end: 射线结束点 [x,y,z] 绝对坐标 start 和 end 一一对应,要求ray_end在体素网格外
-    attenuation: 衰减系数 单位 1/m
+    miu: 衰减系数矩阵[x,y,z] 单位 1/mm
     output_type: 输出类型 "single" 每条射线的路径长度和经过的体素坐标(调试用)  "total" 每条射线的总出射向量
     output:
         data: 每条射线的出射衰减
@@ -276,139 +286,142 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
 
         a_min = max(az_min,ay_min,ax_min)
         a_max = min(az_max,ay_max,ax_max)
-        if output_type == "single":
-            if soc[0]<final_vec[0]:
-                if a_min == az_min:
-                    i_min = 1
-                else:
-                    i_min = math.ceil((soc[0] + a_min * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
-                if a_max == az_max:
-                    i_max = nz
-                else:
-                    i_max = math.floor((soc[0] + a_max * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
-                a_z = az[i_min]
-                iu = 1
+        # if output_type == "single":
+        if soc[0]<final_vec[0]:
+            if a_min == az_min:
+                i_min = 1
             else:
-                if a_min == az_min:
-                    i_max = nz-1
-                else:
-                    i_max = math.floor((soc[0] + a_min * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
-                if a_max == az_max:
-                    i_min = 0
-                else:
-                    i_min = math.ceil((soc[0] + a_max * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
-                a_z = az[i_max]
-                iu = -1
-
-            if soc[1]<final_vec[1]:
-                if a_min == ay_min:
-                    j_min = 1
-                else:
-                    j_min = math.ceil((soc[1] + a_min * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
-                if a_max == ay_max:
-                    j_max = ny
-                else:
-                    j_max = math.floor((soc[1] + a_max * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
-                a_y = ay[j_min]
-                ju = 1
+                i_min = math.ceil((soc[0] + a_min * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
+            if a_max == az_max:
+                i_max = nz
             else:
-                if a_min == ay_min:
-                    j_max = ny-1
-                else:
-                    j_max = math.floor((soc[1] + a_min * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
-                if a_max == ay_max:
-                    j_min = 0
-                else:
-                    j_min = math.ceil((soc[1] + a_max * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
-                a_y = ay[j_max]
-                ju = -1
-
-            if soc[2]<final_vec[2]:
-                if a_min == ax_min:
-                    k_min = 1
-                else:
-                    k_min = math.ceil((soc[2] + a_min * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
-                if a_max == ax_max:
-                    k_max = nx
-                else:
-                    k_max = math.floor((soc[2] + a_max * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
-                a_x = ax[k_min]
-                ku = 1
+                i_max = math.floor((soc[0] + a_max * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
+            a_z = az[i_min]
+            iu = 1
+        else:
+            if a_min == az_min:
+                i_max = nz-1
             else:
-                if a_min == ax_min:
-                    k_max = nx-1
+                i_max = math.floor((soc[0] + a_min * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
+            if a_max == az_max:
+                i_min = 0
+            else:
+                i_min = math.ceil((soc[0] + a_max * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
+            a_z = az[i_max]
+            iu = -1
+
+        if soc[1]<final_vec[1]:
+            if a_min == ay_min:
+                j_min = 1
+            else:
+                j_min = math.ceil((soc[1] + a_min * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
+            if a_max == ay_max:
+                j_max = ny
+            else:
+                j_max = math.floor((soc[1] + a_max * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
+            a_y = ay[j_min]
+            ju = 1
+        else:
+            if a_min == ay_min:
+                j_max = ny-1
+            else:
+                j_max = math.floor((soc[1] + a_min * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
+            if a_max == ay_max:
+                j_min = 0
+            else:
+                j_min = math.ceil((soc[1] + a_max * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
+            a_y = ay[j_max]
+            ju = -1
+
+        if soc[2]<final_vec[2]:
+            if a_min == ax_min:
+                k_min = 1
+            else:
+                k_min = math.ceil((soc[2] + a_min * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
+            if a_max == ax_max:
+                k_max = nx
+            else:
+                k_max = math.floor((soc[2] + a_max * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
+            a_x = ax[k_min]
+            ku = 1
+        else:
+            if a_min == ax_min:
+                k_max = nx-1
+            else:
+                k_max = math.floor((soc[2] + a_min * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
+            if a_max == ax_max:
+                k_min = 0
+            else:
+                k_min = math.ceil((soc[2] + a_max * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
+            a_x = ax[k_max]
+            ku = -1
+
+        Np = i_max - i_min + j_max - j_min + k_max - k_min + 3
+
+        first_i = math.floor((soc[0]+0.5 * (min(a_z,a_y,a_x) + a_min) * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
+        first_j = math.floor((soc[1]+0.5 * (min(a_z,a_y,a_x) + a_min) * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
+        first_k = math.floor((soc[2]+0.5 * (min(a_z,a_y,a_x) + a_min) * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
+        azu = iu * grid_z / (final_vec[0]-soc[0]+eps)
+        ayu = ju * grid_y / (final_vec[1]-soc[1]+eps)
+        axu = ku * grid_x / (final_vec[2]-soc[2]+eps)
+        ac = a_min
+
+        i = first_i
+        j = first_j
+        k = first_k
+        d12 = 0
+        if ac >0:
+            d12 = d * ac
+        delta_d = 0 
+        intensity = vec_intensity
+        # for q in range(Np+1):
+        while True:
+            # i12 = intensity * np.exp(-miu[k,j,i] * d12)
+            if d12 > 0:
+                nums.append(num_i)
+                zs.append(i)
+                ys.append(j)
+                xs.append(k)
+                vec_out_single.append(i12 * vec)
+            if a_z < a_y and a_z < a_x:
+                i12 = intensity * np.exp(-d12)
+                if ac >0:
+                    delta_d = (a_z - ac) * d * miu[k,j,i]
                 else:
-                    k_max = math.floor((soc[2] + a_min * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
-                if a_max == ax_max:
-                    k_min = 0
+                    delta_d = 0
+                d12 = d12 + delta_d
+                i = i + iu
+                ac = a_z
+                a_z = a_z + azu
+            elif a_y < a_x and a_y < a_z:
+                if ac >0:
+                    delta_d = (a_y - ac) * d * miu[k,j,i]
                 else:
-                    k_min = math.ceil((soc[2] + a_max * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
-                a_x = ax[k_max]
-                ku = -1
-
-            Np = i_max - i_min + j_max - j_min + k_max - k_min + 3
-
-            first_i = math.floor((soc[0]+0.5 * (min(a_z,a_y,a_x) + a_min) * (final_vec[0]-soc[0]) - grid_origin[0]) / grid_z)
-            first_j = math.floor((soc[1]+0.5 * (min(a_z,a_y,a_x) + a_min) * (final_vec[1]-soc[1]) - grid_origin[1]) / grid_y)
-            first_k = math.floor((soc[2]+0.5 * (min(a_z,a_y,a_x) + a_min) * (final_vec[2]-soc[2]) - grid_origin[2]) / grid_x)
-            azu = iu * grid_z / (final_vec[0]-soc[0]+eps)
-            ayu = ju * grid_y / (final_vec[1]-soc[1]+eps)
-            axu = ku * grid_x / (final_vec[2]-soc[2]+eps)
-            ac = a_min
-
-            i = first_i
-            j = first_j
-            k = first_k
-            d12 = 0
-            if ac >0:
-                d12 = d * ac * 0.001
-            delta_d = 0 
-            intensity = vec_intensity
-            # for q in range(Np+1):
-            while True:
-                i12 = intensity * np.exp(-attenuation * d12)
-                if d12 > 0:
-                    nums.append(num_i)
-                    zs.append(i)
-                    ys.append(j)
-                    xs.append(k)
-                    vec_out_single.append(i12 * vec)
-                if a_z < a_y and a_z < a_x:
-                    if ac >0:
-                        delta_d = (a_z - ac) * d * 0.001
-                    else:
-                        delta_d = 0
-                    d12 = d12 + delta_d
-                    i = i + iu
-                    ac = a_z
-                    a_z = a_z + azu
-                elif a_y < a_x and a_y < a_z:
-                    if ac >0:
-                        delta_d = (a_y - ac) * d * 0.001
-                    else:
-                        delta_d = 0
-                    d12 = d12 + delta_d
-                    j = j + ju
-                    ac = a_y
-                    a_y = a_y + ayu
+                    delta_d = 0
+                d12 = d12 + delta_d
+                j = j + ju
+                ac = a_y
+                a_y = a_y + ayu
+            else:
+                if ac >0:
+                    delta_d = (a_x - ac) * d * miu[k,j,i]
                 else:
-                    if ac >0:
-                        delta_d = (a_x - ac) * d * 0.001
-                    else:
-                        delta_d = 0
-                    d12 = d12 + delta_d
-                    k = k + ku
-                    ac = a_x
-                    a_x = a_x + axu
-                if i >= nz or i < 0 or j >= ny or j < 0 or k >= nx or k < 0:
-                    break
-            print("total voxels:",len(xs))
-
-        if output_type == "total":
-            intensity = 1
-            d12 = d * a_max * 0.001
-            i12 = intensity * np.exp(-attenuation * d12)
-            vec_out_total.append(i12 * vec)
+                    delta_d = 0
+                d12 = d12 + delta_d
+                k = k + ku
+                ac = a_x
+                a_x = a_x + axu
+            if i >= nz or i < 0 or j >= ny or j < 0 or k >= nx or k < 0:
+                break
+        
+        # print("total voxels:",len(xs))
+        i12 = intensity * np.exp(-d12)
+        vec_out_total.append(i12 * vec)
+        # if output_type == "total":
+        #     intensity = 1
+        #     d12 = d * a_max * 0.001
+        #     i12 = intensity * np.exp(-miu[k,j,i] * d12)
+        #     vec_out_total.append(i12 * vec)
 
     if output_type == "single":
         vec_out = np.array(vec_out_single).astype(np.float32, copy=False)
@@ -429,13 +442,13 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,atten
 
 def main():
     distance_of_source2object=5
-    object_size=[4,4]
-    ny=4
-    nz=4
-    ray_angle=5*np.pi/180
-    ray_step=5*np.pi/180
+    object_size=[40,40]
+    ny=40
+    nz=40
+    ray_angle=90*np.pi/180
+    ray_step=15*np.pi/180
     voxels_size=[1,1,1]
-    attenuation = 50
+    attenuation = 0.068 * np.ones((ny,nz))
     grid_origin = np.array([40, -100, 0])
     grid_size = np.array([1, 1, 1])
     ray_start = np.array([[0,0,0],[0,10,0],[0,20,0],[0,30,0],[0,40,0],[0,50,0],[0,60,0],[0,70,0],[0,80,0],[0,90,0],[0,100,0]])

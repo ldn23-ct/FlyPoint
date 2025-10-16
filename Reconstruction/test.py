@@ -130,17 +130,17 @@ class ReConstruction:
         X = np.zeros_like(Y)
         self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
         #------------------ slice sample ------------------#
-        # self.emit_data = Inc.incident_vector_calulate(SOD,
-        #                                         obj_slice_size,
-        #                                         ny,
-        #                                         nz,
-        #                                         self.fan, 
-        #                                         ray_step=np.deg2rad(1),
-        #                                         voxels_size=self.voxelsize)
-        # np.save("./data/emit_pptr.npy", self.emit_data["p_ptr"])
-        # np.save("./data/emit_midx.npy", self.emit_data["m_idx"])
-        # np.save("./data/emit_data.npy", self.emit_data["data"])
-        # np.save("./data/emit_vec.npy", self.emit_data["vec"])
+        self.emit_data = Inc.incident_vector_calulate(SOD,
+                                                obj_slice_size,
+                                                ny,
+                                                nz,
+                                                self.fan, 
+                                                ray_step=np.deg2rad(1),
+                                                voxels_size=self.voxelsize)
+        np.save("./data/emit_pptr.npy", self.emit_data["p_ptr"])
+        np.save("./data/emit_midx.npy", self.emit_data["m_idx"])
+        np.save("./data/emit_data.npy", self.emit_data["data"])
+        np.save("./data/emit_vec.npy", self.emit_data["vec"])
 
         #------------------ test-- 1 ray ------------------#
         # ny = 1
@@ -219,6 +219,9 @@ class ReConstruction:
         
         cos_phi = np.linalg.norm(vec - np.dot(vec, det_normal)[:, None] * det_normal)
         solid_angle = self.pixelsizeL[0]*self.pixelsizeL[1] * cos_phi / r
+
+        decay = Inc.voxel_path_length_cal(objcorner, self.voxelsize, self.objsize, start_point, end_point, attenuation=0)
+
         self.scatter_data = (solid_angle * self.scatter_data).reshape((self.obj_slice.shape[0], self.detL.shape[0]))
         #------------------ calculate solid angle and decay ------------------#
  
@@ -316,7 +319,8 @@ if __name__ == "__main__":
     E = np.array([160])
     prob = np.array([1])
     rho = 1
-    detResponses = np.load("./data/scan_results_ray_centric.npy")
+    # detResponses = np.load("./data/scan_results_ray_centric.npy")
+    detResponses = np.load("./data/results.npy")
     detResponses_nodefect = np.load("./data/no_defect.npy")
     detResponse = detResponses[75]
     detResponse_nodefect = detResponses_nodefect[75]
