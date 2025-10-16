@@ -130,17 +130,17 @@ class ReConstruction:
         X = np.zeros_like(Y)
         self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
         #------------------ slice sample ------------------#
-        self.emit_data = Inc.incident_vector_calulate(SOD,
-                                                obj_slice_size,
-                                                ny,
-                                                nz,
-                                                self.fan, 
-                                                ray_step=np.deg2rad(1),
-                                                voxels_size=self.voxelsize)
-        np.save("./data/emit_pptr.npy", self.emit_data["p_ptr"])
-        np.save("./data/emit_midx.npy", self.emit_data["m_idx"])
-        np.save("./data/emit_data.npy", self.emit_data["data"])
-        np.save("./data/emit_vec.npy", self.emit_data["vec"])
+        # self.emit_data = Inc.incident_vector_calulate(SOD,
+        #                                         obj_slice_size,
+        #                                         ny,
+        #                                         nz,
+        #                                         self.fan, 
+        #                                         ray_step=np.deg2rad(1),
+        #                                         voxels_size=self.voxelsize)
+        # np.save("./data/emit_pptr.npy", self.emit_data["p_ptr"])
+        # np.save("./data/emit_midx.npy", self.emit_data["m_idx"])
+        # np.save("./data/emit_data.npy", self.emit_data["data"])
+        # np.save("./data/emit_vec.npy", self.emit_data["vec"])
 
         #------------------ test-- 1 ray ------------------#
         # ny = 1
@@ -260,7 +260,7 @@ class ReConstruction:
         A_ptr = self.emit_data["p_ptr"]; Am_idx = self.emit_data["m_idx"]
         A_data = self.emit_data["data"]; A_vec = self.emit_data["vec"]
         P = A_ptr.shape[0] - 1
-        M = self.emit_data["shape"][1]
+        M = self.scatter_data.shape[0]
         N = self.detL.shape[0]
         
         for p in tqdm(range(P)):
@@ -291,12 +291,14 @@ class ReConstruction:
         det_response: shape [n,]
         '''
         result = np.sum(sys_matrix * det_response[None, :], axis=1)
-        plt.imshow(result, cmap="gray", vmin=np.min(result), vmax=np.max(result), aspect='auto')
+        proj = result.reshape((int(result.shape[0]/700), 700))
+        # plt.imshow(proj, cmap="gray", vmin=np.min(result), vmax=np.max(result), aspect='auto')
         
-        # result = np.sum(result, axis=0)
-        # x =  np.arange(result.shape[0])
-        # plt.plot(x, result)
-        plt.show()
+        z = np.sum(proj, axis=0)
+        # x =  np.arange(z.shape[0])
+        # plt.plot(x, z)
+        # plt.show()
+        return z
             
 
 if __name__ == "__main__":
@@ -314,14 +316,18 @@ if __name__ == "__main__":
     E = np.array([160])
     prob = np.array([1])
     rho = 1
-    detResponse = np.load("./simulated_detector_image.npy")
+    detResponses = np.load("./data/scan_results_ray_centric.npy")
+    detResponses_nodefect = np.load("./data/no_defect.npy")
+    detResponse = detResponses[75]
+    detResponse_nodefect = detResponses_nodefect[75]
+    # detResponse = np.load("./simulated_detector_image.npy")
     # detResponse = zoom(detResponse, zoom=10, order=3)
     # detResponse = np.ones((500, 500))
-    # detResponse = np.zeros((50, 50))
-    # detResponse[25:30, :] = 1
+    # print(detResponse.shape)
     # plt.imshow(detResponse, cmap="gray", vmin=np.min(detResponse), vmax=np.max(detResponse), aspect='auto')
     # plt.show()
     detResponse = detResponse.ravel()
+    detResponse_nodefect = detResponse_nodefect.ravel()
     
     tool = ReConstruction(src_pos=src,
                           grid_origin=obj_origin,
@@ -338,19 +344,34 @@ if __name__ == "__main__":
     
     tool.Emit()
     # tool.Scatter()
-    # tool.ScatterM()
 
     #------------------ test emit ------------------#
-    # print(tool.obj_slice.shape)
-    # print(tool.obj_slice[106:120])
-    # print(tool.det[1:11] - tool.det[0:10])
-    # print(tool.det[499] - tool.det[999])
-    # print(tool.det[501:511] - tool.det[500:510])
+    p_ptr = np.load("./data/emit_pptr.npy")
+    m_idx = np.load("./data/emit_midx.npy")
+    emit_data = np.load("./data/emit_data.npy")
+    emit_vec = np.load("./data/emit_vec.npy")
+    # 取出边缘射线
+    l, r = p_ptr[7], p_ptr[8]
+    midx = m_idx[l:r]
+    emitdata = emit_data[l:r]
+    emitvec = emit_vec[l:r]
+    tool.emit_data = {
+        "p_ptr": np.array([0, r]),
+        "m_idx": midx.astype(np.int32),
+        "data": emitdata.astype(np.float64),
+        "vec": emitvec.astype(np.float64),
+        "shape": (1, r)
+    }
+    # i = np.floor(midx / 700)
+    # j = midx % 700
+    # plt.scatter(j, i)
+    # plt.show()
     #------------------ test emit ------------------#
     
+    tool.ScatterM()
+    
     #------------------ test through_slit ------------------#
-    # print(scatter_data.shape)
-    # proj = tool.scatter_data.reshape(700, 2500)
+    # proj = tool.scatter_data
     # for i in range(350, 360):
     #     proj_i = proj[i].reshape((50, 50))
     #     plt.imshow(proj_i, cmap='gray', aspect='auto')
@@ -359,13 +380,18 @@ if __name__ == "__main__":
     
     #------------------ test sysmatrix ------------------#
     # tool.Cal_SysMatrix()
-    # sys = np.load("./sys_matrix/{p}.npy")
+    sys = np.load("./sys_matrix/angle0.npy")
     # print(sys.shape)
-    # for i in range(350, 360):
+    # for i in range(5250, 5260):
     #     proj_i = sys[i].reshape((50, 50))
     #     plt.imshow(proj_i, cmap='gray', aspect='auto')
     #     plt.show()
-    # tool.BackProjection(sys, detResponse)
+    z = tool.BackProjection(sys, detResponse)
+    z_nodefect = tool.BackProjection(sys, detResponse_nodefect)
+    diff = z - z_nodefect
+    x = np.arange(diff.shape[0])
+    plt.plot(x, diff)
+    plt.show()
     #------------------ test sysmatrix ------------------#
     
     

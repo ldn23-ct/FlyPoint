@@ -9,7 +9,7 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     计算入射向量矩阵(每个元素的值代表对应角度，对应体素处的入射向量，向量方向为射线方向，大小为入射强度)
     input:
         distance_of_source2object: 源到物体前表面的距离
-        object_size: 物体的实际尺寸(x，y，z) 单位mm
+        object_size: 物体的实际尺寸(x,y,z) 单位mm
         ny,nz: y,z方向网格数量,要求ny为偶数
         ray_angle: 射线角度范围的一半(偏离垂直入射的最大角度) 单位°
         ray_step: 射线角度步长 单位°
@@ -24,6 +24,7 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     '''
 
     nray = math.floor(ray_angle / ray_step) + 1
+    nray = math.floor(nray * 0.5) + 1
     # ny = math.floor(object_size[1] / voxels_size[0]) + 1
     # nz = math.floor(object_size[0] / voxels_size) + 1
     ny = math.floor(ny * 0.5) + 1
@@ -31,7 +32,7 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     obj_y,obj_z = object_size
     data = np.zeros((nray,ny,nz))
 
-    rays = np.linspace(0,ray_angle,nray)
+    rays = np.linspace(0,ray_angle/2,nray)
 
     # voxel_size_y = obj_y / ny;
     # voxel_size_z = obj_z / nz;
@@ -41,7 +42,7 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
     # grid_origin =np.array([distance_of_source2object, - 0.5 * voxel_size_y,0])
     grid_origin =np.array([distance_of_source2object, 0 ,0])
     critical_angle = math.atan(0.5 * obj_y / distance_of_source2object)
-    for p in range(nray):
+    for p in range(len(rays)):
         if rays[p] > critical_angle:
             break
         ray_vec = np.array([np.cos(rays[p]),np.sin(rays[p]),0])
@@ -113,22 +114,26 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
                 break
 
     # # 去掉 y=0 的第一行
-    data_pos = data[:, 1:, :, :]     # shape (nray, ny-1, nz, 3)
-
+    # data_pos = data[:, 1:, :]     # shape (nray, ny-1, nz)
+    data_zero = np.zeros((len(rays),ny-1,nz))
+    data_half = np.concatenate([data_zero, data], axis=1)
     # data_pos = data
     # 沿 y 维度翻转
-    data_mirror = np.flip(data_pos, axis=1)  # 翻转 y 方向
+    data_mirror = np.flip(data_half, axis=1)  # 翻转 y 方向
 
-
+    # # 去掉 p=0 的第一行
+    data_pos = data_half[1:, :, :]     # shape (nray-1, ny-1, nz)
     # 拼接：先镜像部分(y<0)，再原部分(y>=0)
-    data_full = np.concatenate([data_mirror, data], axis=1)
+    data_full = np.concatenate([data_mirror, data_pos], axis=0)
     ny = 2 * ny - 1 #odd
     # ny = 2 * ny   #even
+    nray = 2 * nray - 1 #odd
+    # nray = 2 * nray   #even
     p,m_y,m_z = np.nonzero(data_full)
     data = data_full[p,m_y,m_z]
     m = nz * m_y + m_z
     m_num = ny * nz
-    p_num = len(p)
+    p_num = nray
     # order = np.argsort(m)
     # p_idx = p[order]
     # data = data[order]
