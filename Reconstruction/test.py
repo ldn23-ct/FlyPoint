@@ -130,17 +130,18 @@ class ReConstruction:
         X = np.zeros_like(Y)
         self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
         #------------------ slice sample ------------------#
-        self.emit_data = Inc.incident_vector_calulate(SOD,
-                                                obj_slice_size,
-                                                ny,
-                                                nz,
-                                                self.fan, 
-                                                ray_step=np.deg2rad(1),
-                                                voxels_size=self.voxelsize)
-        np.save("./data/emit_pptr.npy", self.emit_data["p_ptr"])
-        np.save("./data/emit_midx.npy", self.emit_data["m_idx"])
-        np.save("./data/emit_data.npy", self.emit_data["data"])
-        np.save("./data/emit_vec.npy", self.emit_data["vec"])
+        # self.emit_data = Inc.incident_vector_calulate(SOD,
+        #                                         obj_slice_size,
+        #                                         ny,
+        #                                         nz,
+        #                                         self.fan, 
+        #                                         ray_step=np.deg2rad(0.1),
+        #                                         voxels_size=self.voxelsize,
+        #                                         miu=self.rho[0])
+        # np.save("./data/emit_pptr.npy", self.emit_data["p_ptr"])
+        # np.save("./data/emit_midx.npy", self.emit_data["m_idx"])
+        # np.save("./data/emit_data.npy", self.emit_data["data"])
+        # np.save("./data/emit_vec.npy", self.emit_data["vec"])
 
         #------------------ test-- 1 ray ------------------#
         # ny = 1
@@ -207,22 +208,40 @@ class ReConstruction:
         #                                      threshold=1000,
         #                                      save=True)  # [m, n] [7e3, 2.5e3]
         self.scatter_data = np.load("./data/scatter_data.npy")
+        # print(np.min(tool.scatter_data), np.max(tool.scatter_data))
         #------------------ calculate solid angle and decay ------------------#
         det_normal, self.detL = DetArray(self.detcorners, self.pixelsizeL, self.detsize)
         x, y = np.arange(self.obj_slice.shape[0]), np.arange(self.detL.shape[0])
         m_idx, n_idx = np.meshgrid(x, y, indexing='ij')
         start = self.obj_slice[m_idx]
         end = self.detL[n_idx]
+        #------------------ calculate one decay ------------------#
+        # emit_pptr = self.emit_data["p_ptr"]
+        # emit_midx = self.emit_data["m_idx"]
+        # l, r = emit_pptr[0], emit_pptr[1]
+        # x, y = emit_midx[l:r], np.arange(self.detL.shape[0])
+        # m_idx, n_idx = np.meshgrid(x, y, indexing='ij')
+        # start_point = self.obj_slice[m_idx].reshape(-1, 3)
+        # end_point = self.detL[n_idx].reshape(-1, 3)
+        #------------------ calculate one decay ------------------#
         vec = (end - start).reshape(-1, 3)
         r = np.linalg.norm(vec, axis=1)
-        self.scatter_vec = (vec / r[:, None]).reshape((self.obj_slice.shape[0], self.detL.shape[0], 3))
+        vec = vec / r[:, None]
+        self.scatter_vec = vec.reshape((self.obj_slice.shape[0], self.detL.shape[0], 3))
         
-        cos_phi = np.linalg.norm(vec - np.dot(vec, det_normal)[:, None] * det_normal)
-        solid_angle = self.pixelsizeL[0]*self.pixelsizeL[1] * cos_phi / r
-
-        decay = Inc.voxel_path_length_cal(objcorner, self.voxelsize, self.objsize, start_point, end_point, attenuation=0)
-
-        self.scatter_data = (solid_angle * self.scatter_data).reshape((self.obj_slice.shape[0], self.detL.shape[0]))
+        cos_phi = np.sqrt(1 - (np.clip(vec@det_normal, -1.0, 1.0))**2)
+        solid_angle = self.pixelsizeL[0]*self.pixelsizeL[1] * cos_phi / np.square(r)
+        # 立体角很小，乘以系数因子，整体进行缩放
+        scale = 1 / np.max(solid_angle)
+        solid_angle = scale * solid_angle
+        
+        # objcorner = -1 * self.objsize / 2
+        # objcorner[2] = self.obj_origin[2]
+        # decay = Inc.voxel_path_length_cal(objcorner, self.voxelsize, self.objsize, start_point, end_point, self.rho)
+        # np.save("./data/scatter_decay_angle0.npy", decay)
+        
+        self.scatter_data = self.scatter_data.reshape((self.obj_slice.shape[0], self.detL.shape[0]))
+        # self.scatter_data = (solid_angle * self.scatter_data).reshape((self.obj_slice.shape[0], self.detL.shape[0]))
         #------------------ calculate solid angle and decay ------------------#
  
     def klein_nishina(self, mu):
@@ -255,9 +274,10 @@ class ReConstruction:
         # sin^2 θ = 1 - mu^2
         sin2 = 1.0 - mu_grid**2
         # Klein–Nishina 微分截面 [cm^2/sr]
-        dsdo = 0.5 * (re_cm**2) * (k**2) * (k + invk - sin2)  # shape: [e, n]
+        # dsdo = 0.5 * (re_cm**2) * (k**2) * (k + invk - sin2) * 100  # shape: [e, n]
+        dsdo = 0.5 * (k**2) * (k + invk - sin2)  # re_cm是常数，为了保证数值精度，整体进行缩放
         dsdo = np.sum(dsdo * prob[:, None], axis=0)
-        return dsdo * 100
+        return dsdo
         
     def Cal_SysMatrix(self, save=True):
         A_ptr = self.emit_data["p_ptr"]; Am_idx = self.emit_data["m_idx"]
@@ -268,6 +288,7 @@ class ReConstruction:
         
         for p in tqdm(range(P)):
             sys_matrix_p = np.zeros((M, N))
+            per_matrix_p = np.zeros((M, N))
             al, ar = A_ptr[p], A_ptr[p+1]
             m_idx = Am_idx[al:ar]
             emit_vec, emit_data = A_vec[al:ar], A_data[al:ar]  # [m_p, 3]  [m_p,]
@@ -280,27 +301,43 @@ class ReConstruction:
             coffei = emit_data[:, None] * scatter_data
 
             kn = self.klein_nishina(costheta.ravel()).reshape((m_idx.shape[0], N))
+            # print(np.min(emit_data), np.max(emit_data))
+            # print(np.min(scatter_data), np.max(scatter_data))
+            print(np.min(coffei[350:360]), np.max(coffei[350:360, :]))
+            print(np.min(kn[350:360, :]), np.max(kn[350:360, :]))
             coffei = coffei * kn  # [m_p, 2.5e3]
-            coffei = coffei / np.sum(coffei, axis=0)[None, :]
+            print(np.min(coffei[350:360, :]), np.max(coffei[350:360, :]))
+            per = coffei / np.sum(coffei, axis=0)[None, :]
+            value = per / coffei
             for i in range(coffei.shape[0]):
-                sys_matrix_p[m_idx[i], :] = coffei[i, :]
-
+                sys_matrix_p[m_idx[i], :] = value[i, :]
+                per_matrix_p[m_idx[i], :] = per[i, :]
             if save:
-                np.save(f"./sys_matrix/{p:03d}.npy", sys_matrix_p)
+                np.save(f"./sys_matrix/per{p:03d}.npy", per_matrix_p)
+                np.save(f"./sys_matrix/decay{p:03d}.npy", sys_matrix_p)
             
-    def BackProjection(self, sys_matrix: np.ndarray, det_response: np.ndarray):
+    def BackProjection(self, per: np.ndarray, sys_matrix: np.ndarray, det_response: np.ndarray):
         '''
+        per: shape [m, n]
         sys_matrix: shape [m, n]
         det_response: shape [n,]
         '''
-        result = np.sum(sys_matrix * det_response[None, :], axis=1)
-        proj = result.reshape((int(result.shape[0]/700), 700))
+        # 只取贡献值在最大贡献值10%以上的体素计算
+        per_max = np.max(per, axis=0)
+        mask = (per / per_max[None, :]) > 0.1
+        sum_num = np.sum(mask, axis=1)
+        sum_num[np.isclose(sum_num, 0)] = 1
+        result = sys_matrix * det_response[None, :]
+        vox = np.sum(result * mask, axis=1) / sum_num
+        
+        # result = np.sum(sys_matrix * det_response[None, :], axis=1)
+        proj = vox.reshape((int(vox.shape[0]/700), 700))
         # plt.imshow(proj, cmap="gray", vmin=np.min(result), vmax=np.max(result), aspect='auto')
         
         z = np.sum(proj, axis=0)
-        # x =  np.arange(z.shape[0])
-        # plt.plot(x, z)
-        # plt.show()
+        x =  np.arange(z.shape[0])
+        plt.plot(x, z)
+        plt.show()
         return z
             
 
@@ -318,9 +355,13 @@ if __name__ == "__main__":
                    [-27.95, 25, 193.7], [-27.95, -25, 193.7], [-28.91, -25, 194.85], [-28.91, 25, 194.85]])
     E = np.array([160])
     prob = np.array([1])
-    rho = 1
-    # detResponses = np.load("./data/scan_results_ray_centric.npy")
-    detResponses = np.load("./data/results.npy")
+    # rho = 1
+    voxelshape = (objsize / voxelsize).astype(np.int32)
+    rho = np.zeros(voxelshape)
+    rho.fill(0.134*2.7*1e-3)
+    
+    detResponses = np.load("./data/scan_results_ray_centric.npy")
+    # detResponses = np.load("./data/results.npy")
     detResponses_nodefect = np.load("./data/no_defect.npy")
     detResponse = detResponses[75]
     detResponse_nodefect = detResponses_nodefect[75]
@@ -332,6 +373,8 @@ if __name__ == "__main__":
     # plt.show()
     detResponse = detResponse.ravel()
     detResponse_nodefect = detResponse_nodefect.ravel()
+    
+    
     
     tool = ReConstruction(src_pos=src,
                           grid_origin=obj_origin,
@@ -354,8 +397,8 @@ if __name__ == "__main__":
     m_idx = np.load("./data/emit_midx.npy")
     emit_data = np.load("./data/emit_data.npy")
     emit_vec = np.load("./data/emit_vec.npy")
-    # 取出边缘射线
-    l, r = p_ptr[7], p_ptr[8]
+    # 取出射线
+    l, r = p_ptr[75], p_ptr[76]
     midx = m_idx[l:r]
     emitdata = emit_data[l:r]
     emitvec = emit_vec[l:r]
@@ -378,24 +421,30 @@ if __name__ == "__main__":
     # proj = tool.scatter_data
     # for i in range(350, 360):
     #     proj_i = proj[i].reshape((50, 50))
+    #     print(np.max(proj_i), np.min(proj_i))
     #     plt.imshow(proj_i, cmap='gray', aspect='auto')
     #     plt.show()
     #------------------ test through_slit ------------------#
     
     #------------------ test sysmatrix ------------------#
-    # tool.Cal_SysMatrix()
-    sys = np.load("./sys_matrix/angle0.npy")
-    # print(sys.shape)
+    # decay = np.load("./data/scatter_decay_angle0.npy")  #[700*2500]
+    # decay = decay.reshape(700, 2500)
+    # data_angle0 = tool.scatter_data[4900:5600, :]  #[700, 2500]
+    # tool.scatter_data[4900:5600, :] = decay * data_angle0
+    # print(np.min(tool.scatter_data), np.max(tool.scatter_data))
+    tool.Cal_SysMatrix()
+    per = np.load("./sys_matrix/per000.npy")
+    sys = np.load("./sys_matrix/decay000.npy")
     # for i in range(5250, 5260):
     #     proj_i = sys[i].reshape((50, 50))
     #     plt.imshow(proj_i, cmap='gray', aspect='auto')
     #     plt.show()
-    z = tool.BackProjection(sys, detResponse)
-    z_nodefect = tool.BackProjection(sys, detResponse_nodefect)
-    diff = z - z_nodefect
-    x = np.arange(diff.shape[0])
-    plt.plot(x, diff)
-    plt.show()
+    z = tool.BackProjection(per, sys, detResponse)
+    z_nodefect = tool.BackProjection(per, sys, detResponse_nodefect)
+    # diff = z - z_nodefect
+    # x = np.arange(diff.shape[0])
+    # plt.plot(x, diff)
+    # plt.show()
     #------------------ test sysmatrix ------------------#
     
     

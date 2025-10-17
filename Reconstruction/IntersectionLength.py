@@ -168,7 +168,7 @@ class CalIntersectionLength:
             # 按0.1mm 划分，现在进行聚合
             if not attenuation_i.flags['C_CONTIGUOUS']:
                 attenuation_i = np.ascontiguousarray(attenuation_i)
-            attenuation_i_group = (attenuation_i.reshape(detxL, scale, detxL, scale).sum(axis=(1, 3))).flatten()  # [2.5e3]
+            attenuation_i_group = (attenuation_i.reshape(detxL, scale, detxL, scale).sum(axis=(1, 3)) / (scale**2)).flatten()  # [2.5e3]
             attenuation.append(attenuation_i_group)
             # idx = np.where(attenuation_i < threshold)[0]
             # m_idx.extend([i]*idx.shape[0])
