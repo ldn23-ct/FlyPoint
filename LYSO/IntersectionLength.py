@@ -1,5 +1,5 @@
 import numpy as np
-import incident as Inc
+# import incident as Inc
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import yaml
@@ -145,9 +145,15 @@ class CalIntersectionLength:
         raw[~inside] = 0.0
         raw[zero_dir, :] = 0.0
         lengths_nk = raw
-
+        
+        # 对穿过顺序进行排序
+        t0[~inside] = 10
+        t0[zero_dir, :] = 10
+        k_order = t0.argsort(axis=1).argsort(axis=1) + 1
+        mask = t0 < 2
+        k_order = k_order * mask
         # 需要 [k,n]
-        return lengths_nk.T# (k,n)
+        return lengths_nk.T, k_order.T # (k,n)
 
     def through_slit(self, obj_array: np.ndarray, det_array: np.ndarray, scale: int, threshold, save=False):
         '''
@@ -199,22 +205,19 @@ class CalIntersectionLength:
         #     "n_idx": n_idx,
         #     "shape": (m, n)
         # } 
+
                      
 if __name__ == "__main__":
-    tool = CalIntersectionLength(path="./Reconstruction/Vertex.yaml")
+    tool = CalIntersectionLength(path="./LYSO/detectors.yaml")
     srcs = np.array([
-        [-5, 5, 10],
-        [12, 5, 10]
+        [0, 0, 10.3],
     ])
-    
     ends = np.array([
-        [15, 5, 10],
-        [-1, 5, 10]
-    ]
-    )
-    
-    re= tool.calLength(srcs[1], ends, normals=tool.ns, centers=tool.cs)
-    print(re)
+        [-24, 32.5, 1.5]
+    ])
+
+    l = tool.calLength(srcs[0], ends, tool.ns, tool.cs)
+    print(l)
     # A = np.zeros((100, 100), dtype=int)
 
     # for i in range(10):       # 行方向子块索引
