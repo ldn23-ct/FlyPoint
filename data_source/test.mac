@@ -1,0 +1,46 @@
+# Macro file for testing CCI configuration
+
+# --- Set verbosity ---
+/control/verbose 2
+/run/verbose 2
+/event/verbose 0
+/tracking/verbose 0
+
+/run/numberOfThreads 12
+
+# --- Initialize ---
+/run/initialize
+
+# --- Use new UI commands to override default parameters ---
+
+# Example: Change detector array size
+/cci/config/detector/setNX 25
+/cci/config/detector/setNY 25
+
+# Example: Change object size
+/cci/config/object/setX 20 mm
+/cci/config/object/setY 60 mm
+/cci/config/object/setZ 100 mm
+
+# Example: Change detector position and rotation
+/cci/config/detector/setCenter 40 0 90 mm
+/cci/config/detector/setTheta 45 deg
+
+# Example: Change slit parameters
+/cci/config/slit/setWidth 5 mm
+/cci/config/slit/setHeight 1 mm
+
+# Example: Change source scan parameters
+/cci/config/source/setXStart -14 mm
+/cci/config/source/setXEnd 15 mm
+/cci/config/source/setOmegaY 0.2 rad
+/cci/config/source/setVx 0.5 mm
+
+# NOTE: After changing geometry parameters, you MUST re-initialize
+/run/reinitializeGeometry
+
+/control/execute vis.mac
+/vis/scene/add/axes 0 0 0 100 mm
+
+# --- Run simulation ---
+/run/beamOn 100000
