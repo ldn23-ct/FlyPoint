@@ -111,6 +111,8 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
         for q in range(Np+1):
             # i12 = intensity * np.exp(-attenuation * d12)
             # data[p,j,i] = i12
+            if i >= nz or j >= ny or j < 0 or ac < 0:
+                break
             if a_z < a_y:
                 i12 = intensity * np.exp(-d12)
                 data[p,j,i] = i12
@@ -125,8 +127,6 @@ def incident_vector_calulate(distance_of_source2object=40,object_size=[200,90],n
                 j = j + ju
                 ac = a_y
                 a_y = a_y + ayu
-            if i >= nz or j >= ny or j < 0 or ac < 0:
-                break
 
     # # 去掉 y=0 的第一行
     # data_pos = data[:, 1:, :]     # shape (nray, ny-1, nz)
@@ -382,6 +382,8 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,miu =
         data = np.zeros((nx,ny,nz))#调试可视化用
         while True:
             # i12 = intensity * np.exp(-miu[k,j,i] * d12)
+            if i >= nz or i < 0 or j >= ny or j < 0 or k >= nx or k < 0:
+                break
             if a_z < a_y and a_z < a_x:
                 i12 = intensity * np.exp(-d12)
                 data[k,j,i] = i12
@@ -416,8 +418,6 @@ def voxel_path_length_cal(grid_origin,grid_size,obj_size,ray_start,ray_end,miu =
                 k = k + ku
                 ac = a_x
                 a_x = a_x + axu
-            if i >= nz or i < 0 or j >= ny or j < 0 or k >= nx or k < 0:
-                break
         
         # print("total voxels:",len(xs))
         i12 = intensity * np.exp(-d12)
