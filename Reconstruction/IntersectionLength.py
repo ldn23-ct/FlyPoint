@@ -37,7 +37,7 @@ class CalIntersectionLength:
             rhos.append(cube["rho"])
             vertices.append(cube["vertices"])
         self.vertices = np.array(vertices)      # [n, 8, 3]
-        self.mus = np.array(mus) * np.array(rhos) * 1e-3   # [n,]
+        self.mus = np.array(mus) * np.array(rhos) * 1e-1   # [n,]
     
     def plane_norm(self, verts, idx, center):
         '''

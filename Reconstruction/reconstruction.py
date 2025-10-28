@@ -4,6 +4,7 @@ import incident as Inc
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import IntersectionLength as InL
+# from skimage.metrics import structural_similarity as ssim
 
 def Mapping(pos: np.ndarray, objsize: np.ndarray, voxelsize: np.ndarray, kernelsize: np.ndarray):
     '''
@@ -424,14 +425,14 @@ if __name__ == "__main__":
     prob = np.array([1])
     voxelshape = (objsize / voxelsize).astype(np.int32)
     rho = np.zeros(voxelshape)
-    rho.fill(0.134*2.7*1e-3)
+    rho.fill(0.134*2.7*0.1)
     
-    detResponses = np.load("./data/MC_data/0_degree_interval.npy")[:, ::-1]
+    detResponses = np.load("./data/MC_data/0_degree_interval_5mm.npy")[:, ::-1]
     detResponses_nodefect = np.load("./data/MC_data//0_degree_no_defect.npy")[:, ::-1]
-    # plt.imshow(temp, cmap="gray", aspect='auto')
+    plt.imshow(detResponses.reshape((50, 50)), cmap="gray", aspect='auto')
     # plt.scatter(np.arange(detResponses.shape[0]), np.sum(detResponses, axis=0))
     # plt.scatter(np.arange(detResponses_nodefect.shape[0]), np.sum(detResponses_nodefect, axis=0))
-    # plt.show()
+    plt.show()
     
     detResponse = detResponses.ravel()
     detResponse_nodefect = detResponses_nodefect.ravel()
@@ -459,10 +460,10 @@ if __name__ == "__main__":
     #------------------ test sysmatrix ------------------#
     sys = tool.Cal_SysMatrix(save=False, Debug=1)
         
-    dbug = 1
-    vox_res, z = tool.BackProjection(sys, res, Debug=dbug) 
-    vox_defect, z_defect = tool.BackProjection(sys, detResponse, Debug=dbug)
-    vox_nodefect, z_nodefect = tool.BackProjection(sys, detResponse_nodefect, Debug=dbug)
+    dbug = 0
+    # vox_res, z = tool.BackProjection(sys, res, Debug=dbug) 
+    # vox_defect, z_defect = tool.BackProjection(sys, detResponse, Debug=dbug)
+    # vox_nodefect, z_nodefect = tool.BackProjection(sys, detResponse_nodefect, Debug=dbug)
     
     if dbug > 1:
         _, sys_orig = tool.Cal_SysMatrix(save=False, Debug=3)
@@ -487,14 +488,47 @@ if __name__ == "__main__":
     #------------------ test sysmatrix ------------------#
     
     #------------------ test spatial resolution ------------------#
-    detResponse_5mm = (np.load("./data/MC_data/0_degree_interval_5mm.npy")[:, ::-1]).ravel()
-    detResponse_3mm = (np.load("./data/MC_data/0_degree_interval_3mm.npy")[:, ::-1]).ravel()
-    res_5mm = detResponse_5mm / detResponse_nodefect - 1
-    res_3mm = detResponse_3mm / detResponse_nodefect - 1
+    # detResponse_5mm = (np.load("./data/MC_data/0_degree_interval_5mm.npy")[:, ::-1]).ravel()
+    # detResponse_3mm = (np.load("./data/MC_data/0_degree_interval_3mm.npy")[:, ::-1]).ravel()
+    # res_5mm = detResponse_5mm / detResponse_nodefect - 1
+    # res_3mm = detResponse_3mm / detResponse_nodefect - 1
     
-    _, z = tool.BackProjection(sys, res_5mm, Debug=dbug) 
-    _, z_defect = tool.BackProjection(sys, detResponse_5mm, Debug=dbug)
-    _, z = tool.BackProjection(sys, res_3mm, Debug=dbug) 
-    _, z_defect = tool.BackProjection(sys, detResponse_3mm, Debug=dbug)
+    # _, z = tool.BackProjection(sys, res_5mm, Debug=dbug) 
+    # _, z_defect = tool.BackProjection(sys, detResponse_5mm, Debug=dbug)
+    # _, z = tool.BackProjection(sys, res_3mm, Debug=dbug) 
+    # _, z_defect = tool.BackProjection(sys, detResponse_3mm, Debug=dbug)
     #------------------ test spatial resolution ------------------#
     
+    #------------------ test deg diff ------------------#
+    # sys_0deg = (np.load("./sys_matrix/sys_0deg.npy")).reshape((15, 700, 2500))
+    # sys_7p5deg = (np.load("./sys_matrix/sys_7p5deg.npy")).reshape((15, 700, 2500))
+    # sum_0deg = np.sum(sys_0deg, axis=0)
+    # sum_7p5deg = np.sum(sys_7p5deg, axis=0)
+    
+    #------------------ test deg diff ------------------#
+    
+    detResponse1 = (np.load("./data/MC_data/0_degree_interval_case1.npy")[:, ::-1]).ravel()
+    detResponse2 = (np.load("./data/MC_data/0_degree_interval_case2.npy")[:, ::-1]).ravel()
+    detResponse3 = (np.load("./data/MC_data/0_degree_interval_case3.npy")[:, ::-1]).ravel()
+    res0 = detResponse_nodefect / detResponse_nodefect - 1
+    res1 = detResponse1 / detResponse_nodefect - 1
+    res2 = detResponse2 / detResponse_nodefect - 1
+    res3 = detResponse3 / detResponse_nodefect - 1
+    # fig, axes = plt.subplots(3, 1)
+    # axes[0].imshow(res1.reshape((50, 50)), cmap="gray", aspect='auto')
+    # axes[1].imshow(res2.reshape((50, 50)), cmap="gray", aspect='auto')
+    # axes[2].imshow(res3.reshape((50, 50)), cmap="gray", aspect='auto')
+    # plt.show()
+    # _, z0 = tool.BackProjection(sys, res0, Debug=1)
+    # _, z1 = tool.BackProjection(sys, res1, Debug=1)
+    # _, z2 = tool.BackProjection(sys, res2, Debug=1)
+    # _, z3 = tool.BackProjection(sys, res3, Debug=1)
+
+    # x = np.arange(700)    
+    # diff10 = z1 - z0
+    # diff12 = z1 - z2
+    # diff13 = z1 - z3
+    # plt.plot(x, diff10)
+    # plt.plot(x, diff12)
+    # plt.plot(x, diff13)
+    # plt.show()
