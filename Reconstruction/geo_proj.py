@@ -1,4 +1,5 @@
 import numpy as np
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 class CalSysTool:
@@ -134,8 +135,6 @@ class CalSysTool:
         vec = pts - self.detorigin  # [n, 3]
         row = np.einsum('ij,j->i', vec, self.detv0)
         col = np.einsum('ij,j->i', vec, self.detv1)
-        # row = vec * self.detv0[None, :]
-        # col = vec * self.detv1[None, :]
         return np.stack((row, col), axis=1)
 
     def CalIntersectionLine(self, ds, slit=None, det_center=None, det_normal=None):
@@ -208,11 +207,9 @@ class CalSysTool:
         '''
         Calculate System Matrix
         '''
-        P = int(self.fan / self.anglestep)
-        D = int(self.objsize[2] / self.voxelsize[2])
-        M = int(self.detsize[1] / self.pixelsizeL[1])
-        alphas = np.deg2rad(np.arange(-self.fan/2, self.fan/2 + self.anglestep, self.anglestep))
+        alphas = np.deg2rad(np.arange(-self.fan/2, self.fan/2 + self.anglestep, self.anglestep))[::-1]
         ds = np.arange(self.voxelsize[2]/2, self.objsize[2], self.voxelsize[2])
+        P, D, M = alphas.shape[0], ds.shape[0], int(self.detsize[1] / self.pixelsizeL[1])
         self.CreateDetCoordinate()
         _, det_pts = self.CreateDetArray()
         cols = self.CalIntersectionLine(ds)
@@ -247,8 +244,43 @@ class CalSysTool:
             coffei = coffei / col_sum  # [M, D]
             sysmatrix[p, :, :] = np.transpose(coffei)
         return sysmatrix, cols
+    
+    def BackProjection(self, sys, cols, DetResponse):
+        alphas = np.deg2rad(np.arange(-self.fan/2, self.fan/2 + self.anglestep, self.anglestep))[::-1]
+        ds = np.arange(self.voxelsize[2]/2, self.objsize[2], self.voxelsize[2])
+        P, D = alphas.shape[0], ds.shape[0]
+        back_value = np.zeros((P, D))
+        for i in range(D):
+            # det_response = DetResponse[cols[i]]
+            temp = np.einsum('pm,m->p', sys[:, i, :], DetResponse[:, cols[i]])
+            back_value[:, i] = temp
+        return back_value
 
-
+    def VoxelInterpolation(self,
+        points_xy, values,
+        delta_x, delta_y,
+        *,  # 强制使用命名参数
+        sigma_x_phys=None, sigma_y_phys=None,
+        sigma_x_pix=None,  sigma_y_pix=None,
+        bbox=None,
+        pad_mult=2.5,
+        eps=1e-8,
+    ):
+        SOD = np.abs(self.obj_origin[2] - self.src[2])
+        slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
+        ny = int(2 * np.ceil((slice_halfy - self.voxelsize[1]/2) / self.voxelsize[1])) + 1
+        nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
+        obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
+        vec = -1  #  物体从负方向开始
+        y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
+        z_start = self.obj_origin[2] + vec * self.voxelsize[2] / 2
+        y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
+        z_centers = [(z_start + i * vec * self.voxelsize[2]) for i in range(nz)]
+        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
+        X = np.zeros_like(Y)
+        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        
+        
 
 if __name__ == "__main__":
     slit = np.array([[-27.975, -25, -36.97], [-27.975, 25, -36.97]])
@@ -281,8 +313,21 @@ if __name__ == "__main__":
                          pixel_sizeS=pixelsizeS,
                          fan_angle=fan,
                          angle_step=angle_step,
-                          E=E,
-                          prob=prob,
-                          rho=rho)
+                         E=E,
+                         prob=prob,
+                         rho=rho)
+
+    detResponses = np.load("./data/MC_data/0_degree_interval_5mm.npy")[:, ::-1]
+    detResponses_nodefect = np.load("./data/MC_data//0_degree_no_defect.npy")[:, ::-1]
+    res = detResponses / detResponses_nodefect - 1
     
-    toolbox.CalSystem()
+    sys, cols = toolbox.CalSystem()
+    back_value0 = toolbox.BackProjection(sys, cols, detResponses)
+    back_value1 = toolbox.BackProjection(sys, cols, detResponses_nodefect)
+    back_value2 = toolbox.BackProjection(sys, cols, res)
+    x = np.arange(700)
+    # plt.plot(x, back_value0[0])
+    plt.plot(x, back_value0[75])
+    # plt.plot(x, back_value1[75])
+    # plt.plot(x, back_value2[75])
+    plt.show()
