@@ -17,7 +17,6 @@ class CalSysTool:
                  det_normal: np.ndarray,  #shape: [3,]
                  det_size: np.ndarray,  #shape: [2,]
                  pixel_sizeL: np.ndarray,  #shape: [2,]
-                 pixel_sizeS: np.ndarray,  #shape:[2,]
                  fan_angle: np.float32,
                  angle_step,
                  E,
@@ -31,7 +30,6 @@ class CalSysTool:
         self.slit = slit
         self.detsize = det_size
         self.pixelsizeL = pixel_sizeL
-        self.pixelsizeS = pixel_sizeS
         self.detcenter = det_center
         self.detnormal = det_normal
         self.fan = fan_angle
@@ -85,13 +83,12 @@ class CalSysTool:
 
     def CreateDetArray(self, corners=None, pixelsize=None, detsize=None):
         '''
-        Create a 2D array of detector points
+        Create a 2D array of detector points.
 
         Args:
             corners: the corners of the detector
             pixelsize: the size of the detector'pixel
             detsize: the size of the detector
-        
         Returns:
             normal: the normals of the detector plane
             centers: the center points' position of the pixels
@@ -207,7 +204,10 @@ class CalSysTool:
     def CalSystem(self):
         '''
         Calculate System Matrix
-        
+
+        Args:
+            None
+
         Returns:
             sys: [p,d,m] 不同角度不同深度对探测器特定列的响应
             cols: [d,] 不同深度对应的探测器列数
@@ -251,24 +251,44 @@ class CalSysTool:
         return sysmatrix, cols
     
     def BackProjection(self, sys, cols, DetResponse):
+        '''
+        Args:
+            sys: [p, d, m]  不同角度不同深度对特定列的响应
+            cols: [d,]  不同深度对应的探测器列数
+            detresponse: [p, m, n]  不同角度下的探测器响应
+        Returns:
+            back_value: [p, d]  不同角度不同深度的反投影值
+        '''
         alphas = np.deg2rad(np.arange(-self.fan/2, self.fan/2 + self.anglestep, self.anglestep))[::-1]
         ds = np.arange(self.voxelsize[2]/2, self.objsize[2], self.voxelsize[2])
-        P, D = alphas.shape[0], ds.shape[0]
+        P, D, M = alphas.shape[0], ds.shape[0], int(self.detsize[1] / self.pixelsizeL[1])
         back_value = np.zeros((P, D))
         for i in range(D):
-            temp = np.einsum('pm,m->p', sys[:, i, :], DetResponse[:, cols[i]])
-            back_value[:, i] = temp
+            if cols[i] < 0 or cols[i] > M - 1:
+                back_value[:, i] = np.zeros(P)
+            else:
+                temp = np.einsum('pm,pm->p', sys[:, i, :], DetResponse[:, :, cols[i]])
+                back_value[:, i] = temp
         return back_value
 
     def VoxelInterpolation(self,
-        points_xy, values,
-        delta_x, delta_y,
-        *,  # 强制使用命名参数
-        sigma_x_phys=None, sigma_y_phys=None,
-        sigma_x_pix=None,  sigma_y_pix=None,
-        cval=0.0,
-        eps=1e-8
-    ):
+                           points_xy, values,
+                           delta_x, delta_y,
+                           *,  # 强制使用命名参数
+                           sigma_x_phys=None, sigma_y_phys=None,
+                           sigma_x_pix=None,  sigma_y_pix=None,
+                           cval=0.0,
+                           eps=1e-8
+                        ):
+        if points_xy == None:
+            alphas = np.deg2rad(np.arange(-self.fan/2, self.fan/2 + self.anglestep, self.anglestep))[::-1]
+            ds = np.arange(self.voxelsize[2]/2, self.objsize[2], self.voxelsize[2])
+            pos = np.zeros((alphas.shape[0], ds.shape[0], 3))
+            for p in range(alphas.shape[0]):
+                alpha = alphas[p] * np.ones_like(ds)
+                obj_pts = self.Fan2Euclidean(alpha, ds)
+                pos[p, :, :] = obj_pts
+            points_xy = pos.reshape(-1, 3)[:, 1:]
         x = points_xy[:, 0]
         y = points_xy[:, 1]    
         
@@ -337,24 +357,38 @@ class CalSysTool:
                                 mode="reflect", cval=cval)
         W_blur = gaussian_filter(W, sigma=(sigma_x_pix, sigma_y_pix),
                                 mode="reflect", cval=cval)
-
         V = S_blur / (W_blur + eps)
-
         return V
+
+    def Pos2DetRes(self, filepath, W=512, H=512):
+        pos = np.load(filepath) [:, 1:3]
+        pos = pos[~np.isnan(pos).any(axis=1)]
+        yi = pos[:,0].astype(np.int64, copy=False)
+        xi = pos[:,1].astype(np.int64, copy=False)
+        m = (xi>=0) & (xi<W) & (yi>=0) & (yi<H)
+        xi = xi[m]; yi = yi[m]
+        lin = yi * W + xi
+        img = np.bincount(lin, minlength=W*H).reshape(H, W)
+        return img[:, ::-1]
+
 
 if __name__ == "__main__":
     slit = np.array([[-27.975, -25, -36.97], [-27.975, 25, -36.97]])
+    slit1 = np.array([[28, -25, -37], [28, 25, -37]])
+    slit2 = np.array([[48.12, -25, -37], [48.12, 25, -37]])
     src = np.array([0, 0, 158])
     obj_origin = np.array([0, 0, -50])
     objsize = np.array([200, 200, 70])
-    fan = 15
-    angle_step = 0.1
+    fan = 14
+    angle_step = 1
     voxelsize = np.array([5, 5, 0.1])
     det_size = np.array([50, 50])
-    pixelsizeS = np.array([0.1, 0.1])
-    pixelsizeL = np.array([1, 1])
-    det_center = np.array([-74.26, 0, 33.355])
+    # pixelsizeL = np.array([1, 1])
+    pixelsizeL = np.array([50/512, 50/512])
+    det_center = np.array([-77.04, 0, 37.58])
     det_normal = np.array([0.7661, 0, -0.6427])
+    det_center1 = np.array([66.42, 0, -5.44])
+    det_normal1 = np.array([-0.4291, 0, -0.9033])
     E = np.array([160])
     prob = np.array([1])
     voxelshape = (objsize / voxelsize).astype(np.int32)
@@ -365,59 +399,49 @@ if __name__ == "__main__":
                          grid_origin=obj_origin,
                          obj_size=objsize,
                          voxelsize=voxelsize,
-                         slit=slit,
-                         det_center=det_center,
-                         det_normal=det_normal,
+                        #  slit=slit,
+                         slit=slit1,
+                        #  slit=slit2,
+                        #  det_center=det_center,
+                         det_center=det_center1,
+                        #  det_normal=det_normal,
+                         det_normal=det_normal1,
                          det_size=det_size,
                          pixel_sizeL=pixelsizeL,
-                         pixel_sizeS=pixelsizeS,
                          fan_angle=fan,
                          angle_step=angle_step,
                          E=E,
                          prob=prob,
                          rho=rho)
-
-    detResponses = np.load("./data/MC_data/7p5_degree_interval.npy")[:, ::-1]
-    detResponses0 = np.load("./data/MC_data/0_degree_interval.npy")[:, ::-1]
-    detResponses_nodefect = np.load("./data/MC_data//0_degree_no_defect.npy")[:, ::-1]
-    res = detResponses / detResponses_nodefect - 1
     
-    alphas = np.deg2rad(np.arange(-toolbox.fan/2, toolbox.fan/2 + toolbox.anglestep, toolbox.anglestep))[::-1]
-    ds = np.arange(toolbox.voxelsize[2]/2, toolbox.objsize[2], toolbox.voxelsize[2])
-    pos = np.zeros((alphas.shape[0], ds.shape[0], 3))
-    for p in range(alphas.shape[0]):
-        alpha = alphas[p] * np.ones_like(ds)
-        obj_pts = toolbox.Fan2Euclidean(alpha, ds)
-        pos[p, :, :] = obj_pts
-    # print(pos[0, :, 1])
-    # print(pos[75,:,1])
-    points_xy = pos.reshape(-1, 3)[:, 1:]
     sys, cols = toolbox.CalSystem()
-    back_value0 = toolbox.BackProjection(sys, cols, detResponses0)
-    back_value = toolbox.BackProjection(sys, cols, detResponses)
-    # back_value1 = toolbox.BackProjection(sys, cols, detResponses_nodefect)
-    # back_value2 = toolbox.BackProjection(sys, cols, res)
 
-    # values0 = np.zeros_like(back_value0)
-    # values0[75, :] = back_value0[75, :]
-    # values0 = values0.flatten()
-    # values = np.zeros_like(back_value)
-    # values[0, :] = back_value[0, :]
-    # values = values.flatten()
+    P = int(fan / angle_step) + 1
+    M = int(det_size[0] / pixelsizeL[0])
+    # DetResponse = np.zeros((P, M, M))
+    deg_0_detresponse = toolbox.Pos2DetRes("./TrueData/2025_10_29_15_26_18/position.npy")
+    deg_neg6_detresponse = toolbox.Pos2DetRes("./TrueData/2025_10_29_15_33_37/position.npy")
+    deg_6_detresponse = toolbox.Pos2DetRes("./TrueData/2025_10_29_15_40_4/position.npy")
 
-    V0 = toolbox.VoxelInterpolation(points_xy, values0,
-                               delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
-                               sigma_x_phys=0.6 * toolbox.voxelsize[1],
-                               sigma_y_phys=0.4 * toolbox.voxelsize[2])
+    fig, axes = plt.subplots(3, 2, figsize=(12,18))
+    axes[0, 0].imshow(deg_0_detresponse, cmap='gray', aspect='auto')
+    axes[1, 0].imshow(deg_6_detresponse, cmap='gray', aspect='auto')
+    axes[2, 0].imshow(deg_neg6_detresponse, cmap='gray', aspect='auto')
 
-    V = toolbox.VoxelInterpolation(points_xy, values,
-                               delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
-                               sigma_x_phys=0.6 * toolbox.voxelsize[1],
-                               sigma_y_phys=0.4 * toolbox.voxelsize[2])
+    angle_response = [deg_0_detresponse, deg_6_detresponse, deg_neg6_detresponse]
+    angle_idx = [7, 1, 13]
+    for i in range(3):
+        DetResponse = np.zeros((P, M, M))
+        DetResponse[angle_idx[i], :, :] = angle_response[i]
+        values = toolbox.BackProjection(sys, cols, DetResponse)
+        values = values.flatten()
+        V = toolbox.VoxelInterpolation(None, values,
+                                delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
+                                sigma_x_phys=0.6 * toolbox.voxelsize[1],
+                                sigma_y_phys=0.4 * toolbox.voxelsize[2])
+        axes[i, 1].imshow(V, cmap="gray", aspect='auto')
     
-    fig, axes = plt.subplots(1, 2)
-    axes[0].imshow(V0, cmap="gray", aspect='auto')
-    axes[1].imshow(V, cmap="gray", aspect='auto')
+    plt.tight_layout()
     plt.show()
     
     

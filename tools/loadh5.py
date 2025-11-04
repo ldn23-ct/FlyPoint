@@ -139,11 +139,12 @@ def hits_to_image_integer(coords, W=512, H=512, clip=True):
 
     lin = yi * W + xi
     img = np.bincount(lin, minlength=W*H).reshape(H, W)
-
-    plt.figure(figsize=(6,6))
-    plt.imshow(img, origin='lower', cmap='gray', aspect='equal')
-    plt.xlabel('x pixel'); plt.ylabel('y pixel'); plt.title('Detector hits (counts per pixel)')
-    plt.colorbar(label='counts')
+    fig, axes = plt.subplots(2, 1)
+    axes[0].imshow(img, origin='lower', cmap='gray', aspect='equal')
+    # axes[0].xlabel('x pixel'); axes[0, 0].ylabel('y pixel'); axes[0, 0].title('Detector hits (counts per pixel)')
+    # axes[0].colorbar(label='counts')
+    axes[1].scatter(np.arange(W), np.sum(img, axis=0))
+    plt.tight_layout()
     plt.show()
     return img  
 
@@ -256,11 +257,10 @@ motion_key = "fs"
 #     dset = f[dataset_key]
 #     t = dset - _t0
 # print(t[0:10])
-pos = np.load("./tools/position.npy")
-print(pos.shape)
-with h5py.File(h5_path0, 'r') as f:
-    dset = f[dataset_key]
-    print(dset.shape)
-    pos = np.concatenate((pos, dset), axis=1)
-print(pos.shape)
+pos = np.load("TrueData/2025_10_29_15_26_18\position.npy") [:, 1:3]
+# print(pos.shape)
+# pos = np.load("TrueData/2025_10_29_15_22_13/final_event_list.npy") [:, 0:2]
+pos_clean = pos[~np.isnan(pos).any(axis=1)]
+hits_to_image_integer(pos_clean)
+
 
