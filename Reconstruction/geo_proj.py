@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+from scipy.ndimage import gaussian_filter
 
 class CalSysTool:
     '''
@@ -206,6 +207,10 @@ class CalSysTool:
     def CalSystem(self):
         '''
         Calculate System Matrix
+        
+        Returns:
+            sys: [p,d,m] 不同角度不同深度对探测器特定列的响应
+            cols: [d,] 不同深度对应的探测器列数
         '''
         alphas = np.deg2rad(np.arange(-self.fan/2, self.fan/2 + self.anglestep, self.anglestep))[::-1]
         ds = np.arange(self.voxelsize[2]/2, self.objsize[2], self.voxelsize[2])
@@ -251,7 +256,6 @@ class CalSysTool:
         P, D = alphas.shape[0], ds.shape[0]
         back_value = np.zeros((P, D))
         for i in range(D):
-            # det_response = DetResponse[cols[i]]
             temp = np.einsum('pm,m->p', sys[:, i, :], DetResponse[:, cols[i]])
             back_value[:, i] = temp
         return back_value
@@ -262,25 +266,81 @@ class CalSysTool:
         *,  # 强制使用命名参数
         sigma_x_phys=None, sigma_y_phys=None,
         sigma_x_pix=None,  sigma_y_pix=None,
-        bbox=None,
-        pad_mult=2.5,
-        eps=1e-8,
+        cval=0.0,
+        eps=1e-8
     ):
+        x = points_xy[:, 0]
+        y = points_xy[:, 1]    
+        
         SOD = np.abs(self.obj_origin[2] - self.src[2])
-        slice_halfy = (SOD + self.objsize[2]) * np.tan(self.fan / 2)
+        slice_halfy = (SOD + self.objsize[2]) * np.tan(np.deg2rad(self.fan) / 2)
         ny = int(2 * np.ceil((slice_halfy - self.voxelsize[1]/2) / self.voxelsize[1])) + 1
         nz = int(np.ceil(self.objsize[2] / self.voxelsize[2]))
         obj_slice_size = [ny * self.voxelsize[1], self.objsize[2]]
         vec = -1  #  物体从负方向开始
-        y_start = (obj_slice_size[0] - self.voxelsize[1]) / 2
-        z_start = self.obj_origin[2] + vec * self.voxelsize[2] / 2
-        y_centers = [(y_start - i * self.voxelsize[1]) for i in range(ny)]
-        z_centers = [(z_start + i * vec * self.voxelsize[2]) for i in range(nz)]
-        Y, Z = np.meshgrid(y_centers, z_centers, indexing='ij')
-        X = np.zeros_like(Y)
-        self.obj_slice = np.column_stack([X.ravel(), Y.ravel(), Z.ravel()])  # 按行排序, 左上角为起点
+        x_max = obj_slice_size[0] /2
+        x_min = -1 * x_max
+        y_max = self.obj_origin[2]
+        y_min = y_max + vec * obj_slice_size[1]
+        Nx = int(np.ceil((x_max - x_min) / delta_x))
+        Ny = int(np.ceil((y_max - y_min) / delta_y))
         
+        # --- 3) 连续坐标 → 像素索引（浮点，以像素中心为对齐） ---
+        fx = (x - x_min) / delta_x - 0.5
+        fy = (y_max - y) / delta_y - 0.5
+
+        i0 = np.floor(fx).astype(int)
+        j0 = np.floor(fy).astype(int)
+        di = fx - i0
+        dj = fy - j0
+
+        # 4 邻双线性权重
+        w00 = (1 - di) * (1 - dj)
+        w10 = di * (1 - dj)
+        w01 = (1 - di) * dj
+        w11 = di * dj
+
+        S = np.zeros((Nx, Ny), dtype=np.float64)
+        W = np.zeros((Nx, Ny), dtype=np.float64)
+
+        def safe_add(arr, ii, jj, ww, val=None):
+            mask = (ii >= 0) & (jj >= 0) & (ii < Nx) & (jj < Ny) & (ww > 0)
+            if np.any(mask):
+                if val is None:
+                    np.add.at(arr, (ii[mask], jj[mask]), ww[mask])
+                else:
+                    np.add.at(arr, (ii[mask], jj[mask]), ww[mask] * val[mask])
+
+        # 双线性桶化：按 (行 i, 列 j) 累加
+        safe_add(S, i0,   j0,   w00, values)
+        safe_add(S, i0+1, j0,   w10, values)
+        safe_add(S, i0,   j0+1, w01, values)
+        safe_add(S, i0+1, j0+1, w11, values)
+
+        safe_add(W, i0,   j0,   w00)
+        safe_add(W, i0+1, j0,   w10)
+        safe_add(W, i0,   j0+1, w01)
+        safe_add(W, i0+1, j0+1, w11)
         
+        # 计算各向异性 sigma（像素单位）
+        if sigma_x_pix is None or sigma_y_pix is None:
+            if (sigma_x_phys is None) or (sigma_y_phys is None):
+                # 没给就默认 0.6 像素（保守）
+                sigma_x_pix = 0.6 if sigma_x_pix is None else sigma_x_pix
+                sigma_y_pix = 0.6 if sigma_y_pix is None else sigma_y_pix
+            else:
+                sigma_x_pix = sigma_x_phys / delta_x   # 行方向
+                sigma_y_pix = sigma_y_phys / delta_y   # 列方向
+                
+        # 各向异性高斯卷积：顺序= (行sigma, 列sigma) = (sigma_x_pix, sigma_y_pix)
+        S_blur = gaussian_filter(S, sigma=(sigma_x_pix, sigma_y_pix),
+                                mode="reflect", cval=cval)
+        W_blur = gaussian_filter(W, sigma=(sigma_x_pix, sigma_y_pix),
+                                mode="reflect", cval=cval)
+
+        V = S_blur / (W_blur + eps)
+
+        return V
 
 if __name__ == "__main__":
     slit = np.array([[-27.975, -25, -36.97], [-27.975, 25, -36.97]])
@@ -317,17 +377,48 @@ if __name__ == "__main__":
                          prob=prob,
                          rho=rho)
 
-    detResponses = np.load("./data/MC_data/0_degree_interval_5mm.npy")[:, ::-1]
+    detResponses = np.load("./data/MC_data/7p5_degree_interval.npy")[:, ::-1]
+    detResponses0 = np.load("./data/MC_data/0_degree_interval.npy")[:, ::-1]
     detResponses_nodefect = np.load("./data/MC_data//0_degree_no_defect.npy")[:, ::-1]
     res = detResponses / detResponses_nodefect - 1
     
+    alphas = np.deg2rad(np.arange(-toolbox.fan/2, toolbox.fan/2 + toolbox.anglestep, toolbox.anglestep))[::-1]
+    ds = np.arange(toolbox.voxelsize[2]/2, toolbox.objsize[2], toolbox.voxelsize[2])
+    pos = np.zeros((alphas.shape[0], ds.shape[0], 3))
+    for p in range(alphas.shape[0]):
+        alpha = alphas[p] * np.ones_like(ds)
+        obj_pts = toolbox.Fan2Euclidean(alpha, ds)
+        pos[p, :, :] = obj_pts
+    # print(pos[0, :, 1])
+    # print(pos[75,:,1])
+    points_xy = pos.reshape(-1, 3)[:, 1:]
     sys, cols = toolbox.CalSystem()
-    back_value0 = toolbox.BackProjection(sys, cols, detResponses)
-    back_value1 = toolbox.BackProjection(sys, cols, detResponses_nodefect)
-    back_value2 = toolbox.BackProjection(sys, cols, res)
-    x = np.arange(700)
-    # plt.plot(x, back_value0[0])
-    plt.plot(x, back_value0[75])
-    # plt.plot(x, back_value1[75])
-    # plt.plot(x, back_value2[75])
+    back_value0 = toolbox.BackProjection(sys, cols, detResponses0)
+    back_value = toolbox.BackProjection(sys, cols, detResponses)
+    # back_value1 = toolbox.BackProjection(sys, cols, detResponses_nodefect)
+    # back_value2 = toolbox.BackProjection(sys, cols, res)
+
+    # values0 = np.zeros_like(back_value0)
+    # values0[75, :] = back_value0[75, :]
+    # values0 = values0.flatten()
+    # values = np.zeros_like(back_value)
+    # values[0, :] = back_value[0, :]
+    # values = values.flatten()
+
+    V0 = toolbox.VoxelInterpolation(points_xy, values0,
+                               delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
+                               sigma_x_phys=0.6 * toolbox.voxelsize[1],
+                               sigma_y_phys=0.4 * toolbox.voxelsize[2])
+
+    V = toolbox.VoxelInterpolation(points_xy, values,
+                               delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
+                               sigma_x_phys=0.6 * toolbox.voxelsize[1],
+                               sigma_y_phys=0.4 * toolbox.voxelsize[2])
+    
+    fig, axes = plt.subplots(1, 2)
+    axes[0].imshow(V0, cmap="gray", aspect='auto')
+    axes[1].imshow(V, cmap="gray", aspect='auto')
     plt.show()
+    
+    
+    

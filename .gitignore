@@ -62,3 +62,7 @@ compile_commands.json
 # -----------------
 *.npy
 *.png
+*.h5
+*.txt
+data/
+TrueData/
