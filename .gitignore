@@ -64,5 +64,6 @@ compile_commands.json
 *.png
 *.h5
 *.txt
+*.mat
 data/
 TrueData/
