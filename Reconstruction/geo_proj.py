@@ -400,8 +400,8 @@ if __name__ == "__main__":
                          obj_size=objsize,
                          voxelsize=voxelsize,
                         #  slit=slit,
-                         slit=slit1,
-                        #  slit=slit2,
+                        #  slit=slit1,
+                         slit=slit2,
                         #  det_center=det_center,
                          det_center=det_center1,
                         #  det_normal=det_normal,
@@ -416,30 +416,38 @@ if __name__ == "__main__":
     
     sys, cols = toolbox.CalSystem()
 
+    interface = (np.arange(0, 70, 10) / 0.1).astype(int)
+    print(cols[interface])
+
+
     P = int(fan / angle_step) + 1
     M = int(det_size[0] / pixelsizeL[0])
     # DetResponse = np.zeros((P, M, M))
-    deg_0_detresponse = toolbox.Pos2DetRes("./TrueData/2025_10_29_15_26_18/position.npy")
-    deg_neg6_detresponse = toolbox.Pos2DetRes("./TrueData/2025_10_29_15_33_37/position.npy")
-    deg_6_detresponse = toolbox.Pos2DetRes("./TrueData/2025_10_29_15_40_4/position.npy")
+    deg_0_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_26_18/position.npy")
+    deg_neg6_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_33_37/position.npy")
+    deg_6_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_40_4/position.npy")
 
     fig, axes = plt.subplots(3, 2, figsize=(12,18))
-    axes[0, 0].imshow(deg_0_detresponse, cmap='gray', aspect='auto')
-    axes[1, 0].imshow(deg_6_detresponse, cmap='gray', aspect='auto')
-    axes[2, 0].imshow(deg_neg6_detresponse, cmap='gray', aspect='auto')
+    # axes[0, 0].imshow(deg_0_detresponse, cmap='gray', aspect='equal')
+    # axes[1, 0].imshow(deg_6_detresponse, cmap='gray', aspect='equal')
+    # axes[2, 0].imshow(deg_neg6_detresponse, cmap='gray', aspect='equal')
+    axes[0, 0].scatter(np.arange(M), np.sum(deg_0_detresponse, axis=0))
+    axes[1, 0].scatter(np.arange(M), np.sum(deg_6_detresponse, axis=0))
+    axes[2, 0].scatter(np.arange(M), np.sum(deg_neg6_detresponse, axis=0))
 
-    angle_response = [deg_0_detresponse, deg_6_detresponse, deg_neg6_detresponse]
-    angle_idx = [7, 1, 13]
-    for i in range(3):
-        DetResponse = np.zeros((P, M, M))
-        DetResponse[angle_idx[i], :, :] = angle_response[i]
-        values = toolbox.BackProjection(sys, cols, DetResponse)
-        values = values.flatten()
-        V = toolbox.VoxelInterpolation(None, values,
-                                delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
-                                sigma_x_phys=0.6 * toolbox.voxelsize[1],
-                                sigma_y_phys=0.4 * toolbox.voxelsize[2])
-        axes[i, 1].imshow(V, cmap="gray", aspect='auto')
+    # angle_response = [deg_0_detresponse, deg_6_detresponse, deg_neg6_detresponse]
+    # angle_idx = [7, 1, 13]
+    # for i in range(3):
+    #     DetResponse = np.zeros((P, M, M))
+    #     DetResponse[angle_idx[i], :, :] = angle_response[i]
+    #     values = toolbox.BackProjection(sys, cols, DetResponse)
+    #     values = values.flatten()
+    #     V = toolbox.VoxelInterpolation(None, values,
+    #                             delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
+    #                             sigma_x_phys=0.6 * toolbox.voxelsize[1],
+    #                             sigma_y_phys=0.4 * toolbox.voxelsize[2])
+    #     axes[i, 1].imshow(V, cmap="gray", aspect='auto')
+        # axes[i, 1].scatter(np.arange(V.shape[1]), np.sum(V, axis=0))
     
     plt.tight_layout()
     plt.show()
