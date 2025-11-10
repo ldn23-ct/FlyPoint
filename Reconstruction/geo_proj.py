@@ -1,7 +1,10 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, gaussian_filter1d
+from sklearn.linear_model import RANSACRegressor, LinearRegression
+import tools.timeclass as timeclass
+import tools.parse_rail_motion as motion
 
 class CalSysTool:
     '''
@@ -263,10 +266,12 @@ class CalSysTool:
         ds = np.arange(self.voxelsize[2]/2, self.objsize[2], self.voxelsize[2])
         P, D, M = alphas.shape[0], ds.shape[0], int(self.detsize[1] / self.pixelsizeL[1])
         back_value = np.zeros((P, D))
+        # sys_ones = np.ones_like(sys)
         for i in range(D):
             if cols[i] < 0 or cols[i] > M - 1:
                 back_value[:, i] = np.zeros(P)
             else:
+                # temp = np.einsum('pm,pm->p', sys_ones[:, i, :], DetResponse[:, :, cols[i]])
                 temp = np.einsum('pm,pm->p', sys[:, i, :], DetResponse[:, :, cols[i]])
                 back_value[:, i] = temp
         return back_value
@@ -319,6 +324,10 @@ class CalSysTool:
         w10 = di * (1 - dj)
         w01 = (1 - di) * dj
         w11 = di * dj
+        
+        # # 4 只对竖直方向插值，深度方向不做插值
+        # w0 = 1.0 - di
+        # w1 = di
 
         S = np.zeros((Nx, Ny), dtype=np.float64)
         W = np.zeros((Nx, Ny), dtype=np.float64)
@@ -331,6 +340,14 @@ class CalSysTool:
                 else:
                     np.add.at(arr, (ii[mask], jj[mask]), ww[mask] * val[mask])
 
+        # def safe_add_rc(arr, ii, jj, ww, val=None):
+        #     mask = (ii >= 0) & (jj >= 0) & (ii < Nx) & (jj < Ny) & (ww > 0)
+        #     if np.any(mask):
+        #         if val is None:
+        #             np.add.at(arr, (ii[mask], jj[mask]), ww[mask])
+        #         else:
+        #             np.add.at(arr, (ii[mask], jj[mask]), ww[mask] * val[mask])
+
         # 双线性桶化：按 (行 i, 列 j) 累加
         safe_add(S, i0,   j0,   w00, values)
         safe_add(S, i0+1, j0,   w10, values)
@@ -341,6 +358,12 @@ class CalSysTool:
         safe_add(W, i0+1, j0,   w10)
         safe_add(W, i0,   j0+1, w01)
         safe_add(W, i0+1, j0+1, w11)
+        
+        # # 栅格化（仅行方向线性，两行；列为最近邻）
+        # safe_add_rc(S, i0,   j0, w0, values)
+        # safe_add_rc(S, i0+1, j0, w1, values)
+        # safe_add_rc(W, i0,   j0, w0)
+        # safe_add_rc(W, i0+1, j0, w1)
         
         # 计算各向异性 sigma（像素单位）
         if sigma_x_pix is None or sigma_y_pix is None:
@@ -357,8 +380,114 @@ class CalSysTool:
                                 mode="reflect", cval=cval)
         W_blur = gaussian_filter(W, sigma=(sigma_x_pix, sigma_y_pix),
                                 mode="reflect", cval=cval)
+        # 仅在 axis=0（行轴）卷积；列轴不卷积（保持列分辨率）
+        # S_blur = gaussian_filter1d(S, sigma=sigma_x_pix, axis=0,
+        #                         mode="reflect", cval=cval)
+        # W_blur = gaussian_filter1d(W, sigma=sigma_x_pix, axis=0,
+        #                         mode="reflect", cval=cval)
         V = S_blur / (W_blur + eps)
+        # V = S_blur
         return V
+
+    def VoxelInterpolation3D(self,
+        points_xyz, values,
+        delta_x, delta_y, delta_z,
+        *,
+        # 三选一：给“物理单位”或“像素单位”的 sigma；缺省时默认 0.6 像素
+        sigma_x_phys=None, sigma_y_phys=None, sigma_z_phys=None,
+        sigma_x_pix=None,  sigma_y_pix=None,  sigma_z_pix=None,
+        bbox=None,                  # (xmin,xmax, ymin,ymax, zmin,zmax) —— 必填
+        boundary_mode="reflect",    # 'reflect'|'nearest'|'mirror'|'wrap'|'constant'
+        cval=0.0,
+        eps=1e-8
+    ):
+        """
+        3D：三线性桶化 + 各向异性 3D 高斯卷积 + S/W 归一化（无外延，输出体素严格覆盖 bbox）
+        轴顺序：V.shape == (Nx, Ny, Nz)  对应 x,y,z 三轴
+        """
+        assert bbox is not None and len(bbox) == 6, "bbox=(xmin,xmax,ymin,ymax,zmin,zmax) 必须提供"
+
+        x = points_xyz[:, 0]  # 轴0
+        y = points_xyz[:, 1]  # 轴1
+        z = points_xyz[:, 2]  # 轴2
+        v = values
+
+        xmin, xmax, ymin, ymax, zmin, zmax = bbox
+
+        # 体素数（严格覆盖 bbox）
+        Nx = int(np.ceil((xmax - xmin) / delta_x))
+        Ny = int(np.ceil((ymax - ymin) / delta_y))
+        Nz = int(np.ceil((zmax - zmin) / delta_z))
+
+        # 连续坐标 -> 以体素中心 (i+0.5, j+0.5, k+0.5) 对齐的浮点索引
+        fi = (x - xmin) / delta_x - 0.5
+        fj = (y - ymin) / delta_y - 0.5
+        fk = (z - zmin) / delta_z - 0.5
+
+        i0 = np.floor(fi).astype(int)
+        j0 = np.floor(fj).astype(int)
+        k0 = np.floor(fk).astype(int)
+        di = fi - i0
+        dj = fj - j0
+        dk = fk - k0
+
+        # 8 邻三线性权重
+        w000 = (1-di)*(1-dj)*(1-dk)
+        w100 = di    *(1-dj)*(1-dk)
+        w010 = (1-di)*dj    *(1-dk)
+        w110 = di    *dj    *(1-dk)
+        w001 = (1-di)*(1-dj)*dk
+        w101 = di    *(1-dj)*dk
+        w011 = (1-di)*dj    *dk
+        w111 = di    *dj    *dk
+
+        S = np.zeros((Nx, Ny, Nz), dtype=np.float64)  # (x,y,z)
+        W = np.zeros((Nx, Ny, Nz), dtype=np.float64)
+
+        def add8(arr, val=None):
+            # 将 8 个角加进去，自动裁掉越界
+            def safe_add(ii, jj, kk, ww, val_):
+                mask = (ii>=0)&(jj>=0)&(kk>=0)&(ii<Nx)&(jj<Ny)&(kk<Nz)&(ww>0)
+                if not np.any(mask): return
+                if val_ is None:
+                    np.add.at(arr, (ii[mask], jj[mask], kk[mask]), ww[mask])
+                else:
+                    np.add.at(arr, (ii[mask], jj[mask], kk[mask]), ww[mask]*val_[mask])
+            safe_add(i0,   j0,   k0,   w000, val)
+            safe_add(i0+1, j0,   k0,   w100, val)
+            safe_add(i0,   j0+1, k0,   w010, val)
+            safe_add(i0+1, j0+1, k0,   w110, val)
+            safe_add(i0,   j0,   k0+1, w001, val)
+            safe_add(i0+1, j0,   k0+1, w101, val)
+            safe_add(i0,   j0+1, k0+1, w011, val)
+            safe_add(i0+1, j0+1, k0+1, w111, val)
+
+        add8(S, v)
+        add8(W, None)
+
+        # 计算各向异性 sigma（像素单位）
+        use_pix = (sigma_x_pix is not None) and (sigma_y_pix is not None) and (sigma_z_pix is not None)
+        use_phys = (sigma_x_phys is not None) and (sigma_y_phys is not None) and (sigma_z_phys is not None)
+
+        if not (use_pix or use_phys):
+            # 全缺省：保守默认 0.6 像素
+            sigma_x_pix = 0.6; sigma_y_pix = 0.6; sigma_z_pix = 0.6
+        elif use_phys and not use_pix:
+            sigma_x_pix = sigma_x_phys / delta_x
+            sigma_y_pix = sigma_y_phys / delta_y
+            sigma_z_pix = sigma_z_phys / delta_z
+        # 若已给 pix，就直接用
+
+        # 3D 各向异性高斯卷积（顺序与数组轴一致：(x,y,z) -> (sigma_x, sigma_y, sigma_z)）
+        S_blur = gaussian_filter(S, sigma=(sigma_x_pix, sigma_y_pix, sigma_z_pix),
+                                mode=boundary_mode, cval=cval)
+        W_blur = gaussian_filter(W, sigma=(sigma_x_pix, sigma_y_pix, sigma_z_pix),
+                                mode=boundary_mode, cval=cval)
+
+        V = S_blur / (W_blur + eps)
+
+        # 返回地理信息（左下前原点 + 体素尺寸）
+        return V, (xmin, ymin, zmin, delta_x, delta_y, delta_z)
 
     def Pos2DetRes(self, filepath, W=512, H=512):
         pos = np.load(filepath) [:, 1:3]
@@ -371,15 +500,79 @@ class CalSysTool:
         img = np.bincount(lin, minlength=W*H).reshape(H, W)
         return img[:, ::-1]
 
+    def PreCols(self, d, cols, ransac=True, max_trials=200, residual_threshold=None, eps=1e-12):
+        '''
+        预测不同深度对应的列数，依赖标定数据
+        
+        Args:
+            d: 标定模体交界面对应深度序列
+            cols: 探测器响应交界面对应列数
+        Returns:
+            pre_col: 用于预测深度对应列数的函数
+        '''
+        d = np.asarray(d, dtype=float).ravel()
+        t = np.asarray(cols, dtype=float).ravel()
+        x = 1.0 / d
+        y = 1.0 / t
+        
+        A = B = None
+        used_ransac = False
+        info = {}
+        if ransac:
+            # 自适应阈值：y 的IQR比例，防止尺度问题
+            if residual_threshold is None:
+                q1, q3 = np.percentile(y, [25, 75])
+                iqr = max(q3 - q1, eps)
+                residual_threshold = 1.5 * iqr
+
+            base = LinearRegression(fit_intercept=True)
+            ransac_model = RANSACRegressor(
+                estimator=base,
+                max_trials=max_trials,
+                residual_threshold=residual_threshold,
+                random_state=0
+            )
+            ransac_model.fit(x.reshape(-1, 1), y)
+            B = float(ransac_model.estimator_.coef_[0])     # slope
+            A = float(ransac_model.estimator_.intercept_)   # intercept
+            used_ransac = True
+            inlier_mask = ransac_model.inlier_mask_
+            info["inliers"] = int(np.sum(inlier_mask))
+            info["outliers"] = int(len(inlier_mask) - info["inliers"])
+
+        if A is None or B is None:
+            # 退化为普通最小二乘
+            # y = A + B x
+            B, A = np.polyfit(x, y, 1)
+            used_ransac = False      
+        
+        def pre_col(d_new):
+            denom = A * d_new + B
+            return d_new / denom
+        
+        # 一些质量指标
+        y_hat = A + B * x
+        resid = y - y_hat
+        ss_res = np.nansum(resid**2)
+        ss_tot = np.nansum((y - np.nanmean(y))**2) + eps
+        r2 = 1.0 - ss_res / ss_tot
+        model = {
+            "A": A,
+            "B": B,
+            "used_ransac": used_ransac,
+            "r2_linearized": r2,
+            **info
+        }
+        return pre_col, model
 
 if __name__ == "__main__":
     slit = np.array([[-27.975, -25, -36.97], [-27.975, 25, -36.97]])
-    slit1 = np.array([[28, -25, -37], [28, 25, -37]])
-    slit2 = np.array([[48.12, -25, -37], [48.12, 25, -37]])
+    slit1 = np.array([[28, -25, -37], [28, 25, -37]])  # 靠近射线源，对应探测器后半段
+    slit2 = np.array([[48.12, -25, -37], [48.12, 25, -37]])  # 远离射线源，对应探测器前半段
     src = np.array([0, 0, 158])
     obj_origin = np.array([0, 0, -50])
     objsize = np.array([200, 200, 70])
-    fan = 14
+    fan = 15
     angle_step = 1
     voxelsize = np.array([5, 5, 0.1])
     det_size = np.array([50, 50])
@@ -414,43 +607,58 @@ if __name__ == "__main__":
                          prob=prob,
                          rho=rho)
     
+    col0 = 66
+    d = np.array([10, 20, 30, 40, 50])
+    t = np.array([54, 96, 132, 158, 184])
+    prefunc, model = toolbox.PreCols(d, t)
+    ds = np.arange(toolbox.voxelsize[2]/2, toolbox.objsize[2], toolbox.voxelsize[2])
+    cols_pre = np.round(prefunc(ds) + col0)
     sys, cols = toolbox.CalSystem()
-
-    interface = (np.arange(0, 70, 10) / 0.1).astype(int)
-    print(cols[interface])
-
 
     P = int(fan / angle_step) + 1
     M = int(det_size[0] / pixelsizeL[0])
-    # DetResponse = np.zeros((P, M, M))
-    deg_0_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_26_18/position.npy")
-    deg_neg6_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_33_37/position.npy")
-    deg_6_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_40_4/position.npy")
+    DetResponse = np.zeros((P, M, M))
+    # deg_0_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_26_18/position.npy")
+    # deg_6_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_33_37/position.npy")
+    # deg_neg6_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_40_4/position.npy")
 
-    fig, axes = plt.subplots(3, 2, figsize=(12,18))
+    # fig, axes = plt.subplots(3, 2, figsize=(12,18), constrained_layout=True)
     # axes[0, 0].imshow(deg_0_detresponse, cmap='gray', aspect='equal')
     # axes[1, 0].imshow(deg_6_detresponse, cmap='gray', aspect='equal')
     # axes[2, 0].imshow(deg_neg6_detresponse, cmap='gray', aspect='equal')
-    axes[0, 0].scatter(np.arange(M), np.sum(deg_0_detresponse, axis=0))
-    axes[1, 0].scatter(np.arange(M), np.sum(deg_6_detresponse, axis=0))
-    axes[2, 0].scatter(np.arange(M), np.sum(deg_neg6_detresponse, axis=0))
+    # axes[0, 0].scatter(np.arange(M), np.sum(deg_0_detresponse, axis=0))
+    # axes[1, 0].scatter(np.arange(M), np.sum(deg_6_detresponse, axis=0))
+    # axes[2, 0].scatter(np.arange(M), np.sum(deg_neg6_detresponse, axis=0))
 
     # angle_response = [deg_0_detresponse, deg_6_detresponse, deg_neg6_detresponse]
     # angle_idx = [7, 1, 13]
     # for i in range(3):
     #     DetResponse = np.zeros((P, M, M))
     #     DetResponse[angle_idx[i], :, :] = angle_response[i]
-    #     values = toolbox.BackProjection(sys, cols, DetResponse)
+    #     # values = toolbox.BackProjection(sys, cols, DetResponse)
+    #     values = toolbox.BackProjection(sys, cols_pre.astype(np.int32), DetResponse)
     #     values = values.flatten()
     #     V = toolbox.VoxelInterpolation(None, values,
     #                             delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
     #                             sigma_x_phys=0.6 * toolbox.voxelsize[1],
     #                             sigma_y_phys=0.4 * toolbox.voxelsize[2])
     #     axes[i, 1].imshow(V, cmap="gray", aspect='auto')
-        # axes[i, 1].scatter(np.arange(V.shape[1]), np.sum(V, axis=0))
-    
-    plt.tight_layout()
-    plt.show()
+    #     axes[i, 1].scatter(np.arange(V.shape[1]), np.sum(V, axis=0))
+        
+    # csv_path = './TrueData/tasks/2025-10-29_16-09_5f844ddc/data/events_with_angle.csv'
+    # xy_groups = timeclass.load_xy_groups(csv_path, 0, 10)
+    # for i in range(16):
+    #     img = timeclass.bins_count_image_from_yx(xy_groups[i])
+    #     DetResponse[i, :, :] = img
+    # values = toolbox.BackProjection(sys, cols_pre.astype(np.int32), DetResponse)    
+    # values = values.flatten()    
+    # V = toolbox.VoxelInterpolation(None, values,
+    #                         delta_x=toolbox.voxelsize[1], delta_y=toolbox.voxelsize[2],
+    #                         sigma_x_phys=0.6 * toolbox.voxelsize[1],
+    #                         sigma_y_phys=0.4 * toolbox.voxelsize[2])
+    # vmin, vmax = np.percentile(V, [10, 90])
+    # plt.imshow(V, cmap="gray", aspect='auto', vmin=vmin, vmax=vmax) 
+    # plt.show()
     
     
     

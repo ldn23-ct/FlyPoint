@@ -1,6 +1,7 @@
 import numpy as np
 import h5py
 import matplotlib.pyplot as plt
+import pandas as pd
 
 def optimal_processing_chunk_len(h5_path, dataset_key, bytes_budget=256*1024*1024):
     '''
@@ -190,12 +191,102 @@ def plot_slice_with_segments(x, segs, a, b, annotate=False):
     plt.tight_layout()
     plt.show()
 
+def load_xy_groups(csv_path, i, j):
+    """
+    读入CSV，仅保留 x, y, angle_degree，按角度0..15分组。
+    返回:
+      groups: dict[int -> (n,2) numpy数组]，列顺序 [y, x]（方便后续计数）
+    """
+    df = pd.read_csv(csv_path, usecols=["x", "y", "angle_degree", "period_id"])
+
+    # 清理NaN
+    df = df.dropna(subset=["x", "y", "angle_degree", "period_id"])
+
+    # period_id 天然有序 -> 直接按区间筛选（不开排序）
+    pid = pd.to_numeric(df["period_id"], errors="coerce")
+    mask = (pid >= i) & (pid < j)
+    df = df[mask]
+    groups = {a: np.empty((0, 2), dtype=float) for a in range(16)}
+    if df.empty:
+        print("所在序列为空")
+        return groups
+
+    # 角度转数值并去掉不可转的
+    ang = pd.to_numeric(df["angle_degree"], errors="coerce")
+    df = df[ang.notna()]
+    df["angle_degree"] = ang.astype(np.int64)
+
+    # 仅保留 0..15
+    df = df[(df["angle_degree"] >= 0) & (df["angle_degree"] <= 15)]
+
+    if df.empty:
+        return groups
+    
+    for a, g in df.groupby("angle_degree", sort=True):
+        arr_yx = g[["x", "y"]].to_numpy(copy=False)
+        groups[int(a)] = arr_yx
+
+    return groups
+
+def bins_count_image_from_yx(pos, W=512, H=512, round_mode="truncate"):
+    """
+    对一组[y,x]坐标做分箱计数，返回HxW整型图。
+    round_mode:
+      - 'truncate': 直接astype(int)，向0截断（与你原代码一致）
+      - 'round':    np.rint 四舍五入
+      - 'floor':    np.floor 向下取整
+    """
+    if pos.size == 0:
+        return np.zeros((H, W), dtype=np.int64)
+
+    x = pos[:, 1]
+    y = pos[:, 0]
+
+    if round_mode == "truncate":
+        yi = y.astype(np.int64, copy=False)
+        xi = x.astype(np.int64, copy=False)
+    elif round_mode == "round":
+        yi = np.rint(y).astype(np.int64, copy=False)
+        xi = np.rint(x).astype(np.int64, copy=False)
+    elif round_mode == "floor":
+        yi = np.floor(y).astype(np.int64, copy=False)
+        xi = np.floor(x).astype(np.int64, copy=False)
+    else:
+        raise ValueError("round_mode ∈ {'truncate','round','floor'}")
+
+    # 视野内筛选
+    m = (xi >= 0) & (xi < W) & (yi >= 0) & (yi < H)
+    if not np.any(m):
+        return np.zeros((H, W), dtype=np.int64)
+
+    xi = xi[m]
+    yi = yi[m]
+
+    # 线性索引 + bincount（高效且无锁竞争）
+    lin = yi * W + xi
+    img = np.bincount(lin, minlength=W * H).reshape(H, W)
+
+    # 与你原函数保持一致：左右翻转
+    return img[:, ::-1]
+
+
 if __name__ == "__main__":
-    h5_path = "./TrueData/tasks/2025-10-29_16-09_5f844ddc/data/original_data.h5"
-    dataset_key = "daq0/timestamps"
-    time_width = 1e5  # 0.1ms
-    time_step = 8  # daq采样频率8ns
-    bin_width = int(time_width/ time_step)
-    edges, counts = Time_Counts(h5_path, dataset_key, bin_width)
-    segs = TimeClassification(edges, counts, 1200, 200)  #角速度1200deg/s，角加速度200deg/s^2
-    plot_slice_with_segments(counts, segs, 70000, 73000)
+    # h5_path = "./TrueData/tasks/2025-10-29_16-09_5f844ddc/data/original_data.h5"
+    # dataset_key = "daq0/timestamps"
+    # time_width = 1e5  # 0.1ms
+    # time_step = 8  # daq采样频率8ns
+    # bin_width = int(time_width/ time_step)
+    # edges, counts = Time_Counts(h5_path, dataset_key, bin_width)
+    # segs = TimeClassification(edges, counts, 1200, 200)  #角速度1200deg/s，角加速度200deg/s^2
+    # plot_slice_with_segments(counts, segs, 70000, 73000)
+
+    csv_path = './TrueData/tasks/2025-10-29_16-09_5f844ddc/data/events_with_angle.csv'
+    xy_groups = load_xy_groups(csv_path, 0, 200)
+    fig, axes = plt.subplots(4, 8, figsize=(18, 9), constrained_layout=True)
+    for i in range(16):
+        img = bins_count_image_from_yx(xy_groups[i])
+        img_sum = np.sum(img, axis=0)
+        axes[int(i/4), int(i%4)].imshow(img, cmap='gray', aspect='equal')
+        axes[int(i/4), int(i%4+4)].plot(np.arange(img_sum.shape[0]), img_sum)
+    # plt.tight_layout()
+    plt.show()
