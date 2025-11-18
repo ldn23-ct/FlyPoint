@@ -3,8 +3,9 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from scipy.ndimage import gaussian_filter, gaussian_filter1d
 from sklearn.linear_model import RANSACRegressor, LinearRegression
-import tools.timeclass as timeclass
-import tools.parse_rail_motion as motion
+# import tools.timeclass as timeclass
+# import tools.parse_rail_motion as motion
+import pandas as pd
 
 class CalSysTool:
     '''
@@ -276,6 +277,100 @@ class CalSysTool:
                 back_value[:, i] = temp
         return back_value
 
+    def BackProjection1(self, prefunc, event):
+        '''
+        event: ['timestamps', 'x', 'y', 'rail_x', 'rail_y', 'angle']
+        '''
+        pos_z = prefunc(event[:, 2])
+        start_d = self.src[2] - self.slit[0, 2] + 28  # 标定时钨板前表面到狭缝距离28mm
+        pos = np.stack([event[:, 3], event[:, 4] + start_d*np.tan(np.deg2rad(event[:, 5])), pos_z], axis=1)
+        
+        # pos_z = prefunc(event[:, 1])
+        # start_d = self.src[2] - self.slit[0, 2] + 28  # 标定时钨板前表面到狭缝距离28mm
+        # pos = np.stack([event[:, 2], event[:, 3] + start_d*np.tan(np.deg2rad(event[:, 4])), pos_z], axis=1)
+        # bbox = [-1, 1, -1, 1, 0, 60]
+        
+        # bbox = [-110, 10, 145, 241, 0, 60]
+        bbox = [-100, 10, 200, 296, 0, 60]
+        delta_x = 1
+        delta_y = 2
+        delta_z = 0.5
+        Nx = int((bbox[1] - bbox[0]) / delta_x) + 1
+        Ny = int((bbox[3] - bbox[2]) / delta_y) + 1
+        Nz = int((bbox[5] - bbox[4]) / delta_z) + 1
+        V = np.zeros((Nx, Ny, Nz))
+        
+        mask = (pos[:, 2] < 0) | (pos[:, 2] > 60)
+        pos = pos[~mask]
+        
+        
+        x_idx = np.round((pos[:, 0] - bbox[0])/delta_x).astype(int)
+        y_idx = np.round((pos[:, 1] - bbox[2])/delta_y).astype(int)
+        z_idx = np.round((pos[:, 2] - bbox[4])/delta_z).astype(int)
+        np.add.at(V, (x_idx, y_idx, z_idx), 1)
+        return V
+
+    def trilerp_uniform(self, sys, x0, dx, y0, dy, z0, dz, pos, clamp=True, fill_value=np.nan):
+        """
+        sys: (Px, Py, Pz) 连续内存（C-order）建议
+        pos: (N,3) 物理坐标，列顺序对应 (x,y,z)
+        clamp=True  -> 越界点夹到边界（近邻外推）
+        clamp=False -> 越界返回 fill_value
+        """
+        sys = np.asarray(sys)
+        pos = np.asarray(pos, dtype=np.float64)
+        Px, Py, Pz = sys.shape
+
+        # 连续索引坐标（不取整）
+        ix_f = (pos[:,0] - x0) / dx
+        iy_f = (pos[:,1] - y0) / dy
+        iz_f = (pos[:,2] - z0) / dz
+
+        i0 = np.floor(ix_f).astype(np.int64)
+        j0 = np.floor(iy_f).astype(np.int64)
+        k0 = np.floor(iz_f).astype(np.int64)
+
+        if clamp:
+            i0 = np.clip(i0, 0, Px-2)
+            j0 = np.clip(j0, 0, Py-2)
+            k0 = np.clip(k0, 0, Pz-2)
+            tx = np.clip(ix_f - i0, 0.0, 1.0)
+            ty = np.clip(iy_f - j0, 0.0, 1.0)
+            tz = np.clip(iz_f - k0, 0.0, 1.0)
+            valid = np.ones_like(tx, dtype=bool)
+        else:
+            valid = (i0>=0)&(i0<Px-1)&(j0>=0)&(j0<Py-1)&(k0>=0)&(k0<Pz-1)
+            # 为避免越界取值，复制夹取索引，但后面用 valid 回填
+            i0c = np.clip(i0, 0, Px-2)
+            j0c = np.clip(j0, 0, Py-2)
+            k0c = np.clip(k0, 0, Pz-2)
+            tx = ix_f - i0
+            ty = iy_f - j0
+            tz = iz_f - k0
+            i0, j0, k0 = i0c, j0c, k0c
+            tx = np.where(valid, tx, 0.0)
+            ty = np.where(valid, ty, 0.0)
+            tz = np.where(valid, tz, 0.0)
+
+        i1 = i0 + 1; j1 = j0 + 1; k1 = k0 + 1
+
+        V000 = sys[i0, j0, k0]; V100 = sys[i1, j0, k0]
+        V010 = sys[i0, j1, k0]; V110 = sys[i1, j1, k0]
+        V001 = sys[i0, j0, k1]; V101 = sys[i1, j0, k1]
+        V011 = sys[i0, j1, k1]; V111 = sys[i1, j1, k1]
+
+        c00 = V000*(1-tx) + V100*tx
+        c10 = V010*(1-tx) + V110*tx
+        c01 = V001*(1-tx) + V101*tx
+        c11 = V011*(1-tx) + V111*tx
+        c0  = c00*(1-ty) + c10*ty
+        c1  = c01*(1-ty) + c11*ty
+        vals = c0*(1-tz) + c1*tz
+
+        if not clamp:
+            vals = np.where(valid, vals, fill_value)
+        return vals
+
     def VoxelInterpolation(self,
                            points_xy, values,
                            delta_x, delta_y,
@@ -500,9 +595,9 @@ class CalSysTool:
         img = np.bincount(lin, minlength=W*H).reshape(H, W)
         return img[:, ::-1]
 
-    def PreCols(self, d, cols, ransac=True, max_trials=200, residual_threshold=None, eps=1e-12):
+    def PreCols(self, ds, cols, ransac=True, max_trials=200, residual_threshold=None, eps=1e-12):
         '''
-        预测不同深度对应的列数，依赖标定数据
+        预测不同列对应的深度，依赖标定数据
         
         Args:
             d: 标定模体交界面对应深度序列
@@ -510,11 +605,12 @@ class CalSysTool:
         Returns:
             pre_col: 用于预测深度对应列数的函数
         '''
-        d = np.asarray(d, dtype=float).ravel()
-        t = np.asarray(cols, dtype=float).ravel()
-        x = 1.0 / d
-        y = 1.0 / t
-        
+        ds = np.asarray(ds, dtype=float).ravel()
+        cols = np.asarray(cols, dtype=float).ravel()
+        delta_cols = cols[1:] - cols[0]
+        x = 1.0 / delta_cols
+        y = 1.0 / ds[1:]
+    
         A = B = None
         used_ransac = False
         info = {}
@@ -546,24 +642,65 @@ class CalSysTool:
             B, A = np.polyfit(x, y, 1)
             used_ransac = False      
         
-        def pre_col(d_new):
-            denom = A * d_new + B
-            return d_new / denom
+        def pre_col(col_new, eps=1e-18):
+            delta_col = col_new - cols[0]
+            denom = A * delta_col + B
+            return delta_col / denom
         
-        # 一些质量指标
-        y_hat = A + B * x
-        resid = y - y_hat
-        ss_res = np.nansum(resid**2)
-        ss_tot = np.nansum((y - np.nanmean(y))**2) + eps
-        r2 = 1.0 - ss_res / ss_tot
-        model = {
-            "A": A,
-            "B": B,
-            "used_ransac": used_ransac,
-            "r2_linearized": r2,
-            **info
-        }
+        model = (A, B)
+        
         return pre_col, model
+
+
+def bins_count_image_from_xy(pos, W=512, H=512, round_mode="truncate"):
+    """
+    对一组[y,x]坐标做分箱计数，返回HxW整型图。
+    round_mode:
+      - 'truncate': 直接astype(int)，向0截断（与你原代码一致）
+      - 'round':    np.rint 四舍五入
+      - 'floor':    np.floor 向下取整
+    """
+    if pos.size == 0:
+        return np.zeros((H, W), dtype=np.int64)
+
+    x = pos[:, 0]
+    y = pos[:, 1]
+
+    if round_mode == "truncate":
+        yi = y.astype(np.int64, copy=False)
+        xi = x.astype(np.int64, copy=False)
+    elif round_mode == "round":
+        yi = np.rint(y).astype(np.int64, copy=False)
+        xi = np.rint(x).astype(np.int64, copy=False)
+    elif round_mode == "floor":
+        yi = np.floor(y).astype(np.int64, copy=False)
+        xi = np.floor(x).astype(np.int64, copy=False)
+    else:
+        raise ValueError("round_mode ∈ {'truncate','round','floor'}")
+
+    # 视野内筛选
+    m = (xi >= 0) & (xi < W) & (yi >= 0) & (yi < H)
+    if not np.any(m):
+        return np.zeros((H, W), dtype=np.int64)
+
+    xi = xi[m]
+    yi = yi[m]
+
+    # 线性索引 + bincount（高效且无锁竞争）
+    lin = yi * W + xi
+    img = np.bincount(lin, minlength=W * H).reshape(H, W)
+
+    # 与你原函数保持一致：左右翻转
+    return img
+
+
+def func0(A, B, col0):
+    def pre_col(col_new, eps=1e-18):
+        delta_col = col_new - col0
+        denom = A * delta_col + B
+        return delta_col / denom
+    return pre_col, (A, B)
+
 
 if __name__ == "__main__":
     slit = np.array([[-27.975, -25, -36.97], [-27.975, 25, -36.97]])
@@ -607,17 +744,43 @@ if __name__ == "__main__":
                          prob=prob,
                          rho=rho)
     
-    col0 = 66
-    d = np.array([10, 20, 30, 40, 50])
-    t = np.array([54, 96, 132, 158, 184])
-    prefunc, model = toolbox.PreCols(d, t)
-    ds = np.arange(toolbox.voxelsize[2]/2, toolbox.objsize[2], toolbox.voxelsize[2])
-    cols_pre = np.round(prefunc(ds) + col0)
-    sys, cols = toolbox.CalSystem()
+
+    cols_calibration = np.load("cols.npy")[::-1]
+    ds_calibration = np.arange(0, 62, 2)
+    prefunc, model = toolbox.PreCols(ds_calibration, cols_calibration)
+    # prefunc, model = func0(0.0003, 4.8062, 90)  #slit2
+    # prefunc = func0(-0.0672, 8.4804, 358)  #slit1
+    
+    A, B = model
+    ds = np.arange(0, 60)
+    dcs = B*ds / (1-A*ds)
+    cs = cols_calibration[0] + dcs
+
+    # npy_path = './TrueData/test/2025_11_13_15_15_11/2_events_with_angle.npy'
+    # event = np.load(npy_path)
+    # event[:, 1] = 511 - event[:, 1]  # 双缝位置需要镜像
+    # df = pd.read_csv(csv_path, usecols=["x", "y", 'rail_x', 'rail_y', 'angle'])
+    # df = df.dropna(subset=["x", "y", 'rail_x', 'rail_y', 'angle'])
+    # event = df.to_numpy()[:, [0, 1]]
+    # img = bins_count_image_from_xy(event, round_mode="round")
+    # fig, axes = plt.subplots(1, 2)
+    # axes[0].plot(np.arange(img.shape[1]), np.sum(img, axis=1))
+    # plt.imshow(img, cmap='gray')
+    # for i in range(cs.shape[0]):
+        # axes[0].axvline(x=cs[i])
+    
+    
+    
+    
+    # col = np.arange(69, 500)
+    # d_pre = prefunc(col)
+    # d_pre[np.isinf(d_pre)] = 0
+
+    # sys, cols = toolbox.CalSystem()
 
     P = int(fan / angle_step) + 1
     M = int(det_size[0] / pixelsizeL[0])
-    DetResponse = np.zeros((P, M, M))
+    # DetResponse = np.zeros((P, M, M))
     # deg_0_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_26_18/position.npy")
     # deg_6_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_33_37/position.npy")
     # deg_neg6_detresponse = toolbox.Pos2DetRes("./TrueData/daq/2025_10_29_15_40_4/position.npy")
@@ -661,4 +824,23 @@ if __name__ == "__main__":
     # plt.show()
     
     
+    event = np.load("./TrueData/task/2025-11-12_19-01_11e9aa61/events_with_angle.npy")
+    # event[:, 2] = 511 - event[:, 2]  # 双缝位置需要镜像
+    
+    V = toolbox.BackProjection1(prefunc, event)
+    # print(V.shape)
+    # axes[1].plot(np.arange(V.shape[0]), V)
+    # plt.show()
+    # V, model = toolbox.BackProjection1(prefunc, event)
+    # print(V.shape)
+    # plt.imshow(np.sum(V, axis=1), cmap='gray', aspect='auto')
+    # plt.show()
+    for i in range(V.shape[2]):
+        img = V[:, :, i]
+        # axes[1].plot(np.arange(img.shape[1]), np.sum(img, axis=0))
+        plt.imshow(img, cmap='gray', aspect='auto')
+        # plt.show()
+        plt.savefig(f"./fig/{i}.tif")
+    
+        
     
