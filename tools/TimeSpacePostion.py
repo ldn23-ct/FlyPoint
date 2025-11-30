@@ -39,15 +39,15 @@ class MotionParser:
         motions = np.array(motions)
         motions_sort_idx = np.argsort(motions[:, 0])
         motions = motions[motions_sort_idx]
-        return self.insert_bound_motions(
-            motions,
-            self.rail_acc_dec, 
-            self.rail_long_axis_speed,
-            self.rail_long_axis_min, self.rail_long_axis_max, self.rail_uniform_margin,
-            self.rail_long_axis,
-            vel_tol=5e-1
-        )
-        # return motions
+        # return self.insert_bound_motions(
+        #     motions,
+        #     self.rail_acc_dec, 
+        #     self.rail_long_axis_speed,
+        #     self.rail_long_axis_min, self.rail_long_axis_max, self.rail_uniform_margin,
+        #     self.rail_long_axis,
+        #     vel_tol=5e-1
+        # )
+        return motions
 
     @staticmethod
     def insert_bound_motions(
@@ -217,6 +217,7 @@ def just_decode_daq_data(origin_data,
         arr = np.column_stack((valid_event_ts[valid_event_mask], x[valid_event_mask], y[valid_event_mask]))
         results.append(arr)
     return results
+
 class TimeClass:
     def __init__(self,
                 time_width,  # 0.1ms
@@ -418,8 +419,6 @@ class TimeClass:
 
         # return np.asarray(filtered)
 
-
-
     def segment_by_angle(self, data, segs, angle_v=None, time_step=None):
         """
         将每个周期内的事件按角度划分。
@@ -550,56 +549,6 @@ class TimeClass:
         plt.tight_layout()
         plt.show()
 
-    def DetResponse(self, 
-                    original_data,
-                    angle_bins,
-                    img_shape,
-                    save=False,
-                    save_path=None):
-        '''
-        根据位置返回分组探测器响应
-        data cols: ['timestamp', 'x', 'y', 'energy', 'period_id', 'angle', 'angle_degree', 'rail_x', 'rail_y']
-        '''
-        # timestamps = original_data.icol[:, 0]
-        # edges, counts = self.Time_Counts(timestamps)
-        # segs = self.TimeClassification(edges, counts)
-        # if segs.size > 0:
-        #     segmented_df = self.segment_by_angle(data, segs)
-        # else:
-        #     print("未找到任何周期，无法进行角度划分。")  
-        #     return  
-        selected_cols = ['x', 'y', 'period_id', 'angle_degree', 'rail_x', 'rail_y']
-        # df = segmented_df[selected_cols]
-        df = original_data[selected_cols]
-        
-        # rail_x 唯一值（保持出现顺序）
-        rail_vals = pd.unique(df['rail_x'].astype(int))
-        m = len(rail_vals)
-        # 预分配结果数组
-        imgs = np.zeros((m, angle_bins, img_shape[0], img_shape[1]), dtype=np.int64)
-        # 建立 rail_x -> 索引映射
-        rail_to_row = {rv: i for i, rv in enumerate(rail_vals)}
-        
-        # 按 rail_x 分组（不排序，保持天然顺序）
-        for rail_val, df_r in df.groupby('rail_x', sort=False):
-            i = rail_to_row[int(rail_val)]
-            print(i)
-            # 按 angle_degree 分组
-            for angle_idx, df_ra in df_r.groupby('angle_degree', sort=False):
-                pos = df_ra[['x', 'y']].to_numpy()
-                if pos.size == 0:
-                    continue
-
-                img = self.bins_count_image_from_yx(pos, W=img_shape[0], H=img_shape[1])
-                if not isinstance(img, np.ndarray):
-                    raise ValueError(
-                        f"bins_count_image_from_xy 返回形状 {getattr(img, 'shape', None)}，应为 {img_shape}"
-                    )
-
-                imgs[i, int(angle_idx), :, :] = img
-        if save:
-            np.save(save_path, imgs)
-
     def bins_count_image_from_yx(self, pos, W=512, H=512, round_mode="truncate"):
         """
         对一组[y,x]坐标做分箱计数，返回HxW整型图。
@@ -642,8 +591,8 @@ class TimeClass:
         return img[::-1, ::-1]
 
 if __name__ == "__main__":
-    dir = "./TrueData/test/2025-11-17_15-33_50eda15f"  # 间隔模体数据
-    # dir = "./TrueData/test/2025-11-17_15-37_794fc1c8"
+    # dir = "./TrueData/test/2025-11-17_15-33_50eda15f"  # 间隔模体数据
+    dir = "./TrueData/test/2025-11-21_17-34_105484aa"
     motion_file = dir + "/data/motion.h5"
     daq_origin_data_file = dir + "/data/original_data.h5"
     outputpath0 = dir + "/0_events_with_angle.npy"
@@ -663,9 +612,14 @@ if __name__ == "__main__":
         event_data = np.hstack([event_ts.reshape(-1, 1), integral_data])
         start_collecting_time = daq0.attrs["start_collecting_time"]
     
+    
+    # rail_long_axis_min=-83, rail_long_axis_max=28,
+    # rail_long_axis_min=-151, rail_long_axis_max=51,
+    # rail_long_axis_min=-160, rail_long_axis_max=40,
+    
     parser = MotionParser(
             rail_acc_dec=2000, rail_long_axis_speed=5,
-            rail_long_axis_min=-82, rail_long_axis_max=28,
+            rail_long_axis_min=-20, rail_long_axis_max=30,
             rail_uniform_margin=0.5,
             rail_long_axis="x",
             rail_timestamp_offset=rail_timestamp_offset,
@@ -682,24 +636,20 @@ if __name__ == "__main__":
     #-----------------此处修改角速度筛选匀速转动部分-----------------#
     fs_angle_v = 1200
     fsmask = fs_motions[:, -1] >= (fs_angle_v - 2)
-    fs_t_min = fs_motions[:, 0][fsmask][0]
-    # fs_t_min = None
+    # fs_t_min = fs_motions[:, 0][fsmask][0]
+    fs_t_min = None
     #-----------------此处修改角速度筛选匀速转动部分-----------------#
 
     event_data0, event_data1 = just_decode_daq_data(event_data,
                                                     valid_sum_range=(100, 32000), 
                                                     pos_decode_param=200)
-    
-    print(event_data0[-1, 0])
-    
-    
     event_with_coords0 = parser.get_count_events_with_coords(
         event_data0, rail_motions, fs_motions, fs_t_min
     )
     event_with_coords1 = parser.get_count_events_with_coords(
         event_data1, rail_motions, fs_motions, fs_t_min
     )
-    print(event_with_coords0[-1, 0])
+    
     # event_with_coords = parser.process_fs_angle(event_with_coords, 
     #                                             spot_step=18)
     
@@ -708,23 +658,26 @@ if __name__ == "__main__":
     # data = event_with_coords[:, :-1][rail_x_mask]
     event_with_coords1[:, 2] = 511 - event_with_coords1[:, 2]  #双缝需要镜像
 
-    timeclass = TimeClass(time_width=1e5,  #0.1ms
-                          time_step=8,  #8ns
-                          angle=18,
-                          angle_v=1200  # 1200deg/s
-                          )
-    
-    # timestamps = data[:, 0]
-    # edges, counts = timeclass.Time_Counts(timestamps)
-    # print(counts.shape)
-    # a, b = 0, 3000
-    # a, b = 159000, 161399
-    # segs = timeclass.TimeClassification(edges, counts, show=True)
-    # timeclass.plot_slice_with_segments(counts, segs, a, b)
-    
-    
-    timeclass.SaveCSV(event_with_coords0, outputpath0)
-    timeclass.SaveCSV(event_with_coords1, outputpath1)
-    
-    # np.save(outputpath, event_with_coords)
+    flypoint = 1
+    if flypoint:
+        timeclass = TimeClass(time_width=1e5,  #0.1ms
+                            time_step=8,  #8ns
+                            angle=18,
+                            angle_v=1200  # 1200deg/s
+                            )
+        
+        # timestamps = event_with_coords1[:, 0]
+        # edges, counts = timeclass.Time_Counts(timestamps)
+        # # print(counts.shape)
+        # # a, b = 10000, 13000
+        # # a, b = 0, 3000
+        # segs = timeclass.TimeClassification(edges, counts, show=True)
+        # timeclass.plot_slice_with_segments(counts, segs, a, b)
+        
+        
+        timeclass.SaveCSV(event_with_coords0, outputpath0)
+        timeclass.SaveCSV(event_with_coords1, outputpath1)
+    else:
+        np.save(outputpath0, event_with_coords0)
+        np.save(outputpath0, event_with_coords1)
     

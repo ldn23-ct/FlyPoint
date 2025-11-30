@@ -1,13 +1,14 @@
 import numpy as np
 from pathlib import Path
 import os
+from scipy.io import loadmat
 import matplotlib.pyplot as plt
 
 def findcols(
     y,
     k,
     baseline_q=0.10,      # 用分位数估计底部
-    smooth_window=5       # 移动平均窗口
+    smooth_window=8       # 移动平均窗口
 ):
     """
     在单通道 1D 曲线中，寻找 k 个峰的“左侧半高点”。
@@ -124,7 +125,7 @@ def findcols(
 
     return x_halfs, info
 
-def bins_count_image_from_xy(pos, W=512, H=512, round_mode="truncate", detid=0):
+def bins_count_image_from_xy(pos, W=512, H=512, round_mode="truncate"):
     """
     对一组[x,y]坐标做分箱计数，返回HxW整型图。
     round_mode:
@@ -159,69 +160,102 @@ def bins_count_image_from_xy(pos, W=512, H=512, round_mode="truncate", detid=0):
     yi = yi[m]
 
     # 线性索引 + bincount（高效且无锁竞争）
-    lin = xi * W + yi
+    lin = yi * W + xi
     img = np.bincount(lin, minlength=W * H).reshape(H, W)
     return img
 
-def process_one_txt(txt_path, detid, visible=False):
-    if detid == 0:
-        data = np.loadtxt(txt_path, delimiter=" ", encoding="utf-8")[:, 6:]
-        k = 1
-    elif detid == 1:
-        data = np.loadtxt(txt_path, delimiter=" ", encoding="utf-8")[:, 2:6]
-        k = 2
-    data = data.astype(np.float64)
-    adc_sums = np.sum(data, axis=1)
-    adc_sums_nozero = adc_sums.copy()
-    adc_sums_nozero[adc_sums_nozero == 0] = np.finfo(float).eps
-    x_coords = np.round((data[:,0] + data[:,1] - data[:,2] - data[:,3]) / adc_sums_nozero * 200) + 255
-    y_coords = np.round((data[:,0] - data[:,1] - data[:,2] + data[:,3]) / adc_sums_nozero * 200) + 255
-    # 创建一个逻辑掩码，标记所有位置坐标在 [1, 512] 范围内的有效事件
-    valid_pos_mask = (x_coords >= 0) & (x_coords < 512) & (y_coords >= 0) & (y_coords < 512)
-
-    valid_x = (511.0 - x_coords[valid_pos_mask]).astype(int)
-    if detid == 1:
-        valid_y = (511.0 - y_coords[valid_pos_mask]).astype(int)
-    else:
-        valid_y = y_coords[valid_pos_mask].astype(int)
-    img = bins_count_image_from_xy(np.column_stack((valid_x, valid_y)), detid=detid)
-    x_half, info = findcols(np.sum(img, axis=0), k=k)
+def process_one_txt(txt_path, valid_sum_range: tuple = (100, 32000), posdecode=False, matinfo=None, visible=False):
+    datatxt = np.loadtxt(txt_path, delimiter=" ", encoding="utf-8")
+    # datatxt = np.genfromtxt(txt_path, delimiter=" ", encoding="utf-8", invalid_raise=False)
+    datatxt = datatxt[datatxt[:, 0] == 0]
+    data0 = datatxt[:, 6:].astype(np.float64)
+    data1 = datatxt[:, 2:6].astype(np.float64)
+    data_list = [data0, data1]
+    img_list, x_half_list, info_list = [], [], []
+    for i in range(2):
+        data = data_list[i]
+        adc_sums = np.sum(data, axis=1)
+        valid_mask = (adc_sums > valid_sum_range[0]) & (adc_sums < valid_sum_range[1])
+        data = data[valid_mask, :]
+        adc_sums = adc_sums[valid_mask]
+        x_coords = np.round((data[:,0] + data[:,1] - data[:,2] - data[:,3]) / adc_sums * 200) + 255
+        y_coords = np.round((data[:,0] - data[:,1] - data[:,2] + data[:,3]) / adc_sums * 200) + 255
+        if posdecode:
+            if matinfo == None:
+                raise ValueError("File Not Found: matinfo is None")
+            matdir, rows, cols = matinfo["matdir"], matinfo["rows"], matinfo["cols"]
+            labelmap = loadmat(matdir + f"/labelmap{i}.mat")['labelmap']
+            x_coords = np.clip(np.round(x_coords), 0, 511).astype(int)
+            y_coords = np.clip(np.round(y_coords), 0, 511).astype(int)
+            pixel_id = labelmap[x_coords, y_coords] - 1
+            valid_x = cols - 1 - pixel_id // rows
+            if i == 1:
+                valid_y = rows - 1 - pixel_id % rows
+            else: 
+                valid_y = pixel_id % rows
+              
+        else:
+            rows, cols = 512, 512
+            # 创建一个逻辑掩码，标记所有位置坐标在 [0, 512) 范围内的有效事件
+            valid_pos_mask = (x_coords >= 0) & (x_coords < 512) & (y_coords >= 0) & (y_coords < 512)
+            valid_x = (511.0 - x_coords[valid_pos_mask]).astype(int)
+            if i == 1:
+                valid_y = (511.0 - y_coords[valid_pos_mask]).astype(int)
+            else:
+                valid_y = y_coords[valid_pos_mask].astype(int)
+        # img = bins_count_image_from_xy(np.column_stack((valid_x, valid_y)), W=cols, H=rows)
+        img = np.zeros((cols, rows))
+        np.add.at(img, (valid_x, valid_y), 1)
+        x_half, info = findcols(np.sum(img, axis=0), k=i+1)
+        img_list.append(img)
+        x_half_list.append(x_half)
+        info_list.append(info)
     
     if visible:
-        col_smooth, col_base, peaks_idx = info["y_smooth"], info["y_base"], info["peaks_idx"]
-        plt.imshow(img, cmap='gray', aspect='auto')
-        # plt.plot(np.arange(col_smooth.shape[0]), col_smooth)
-        # plt.axhline(y=col_base)
-        # for i in range(x_half.shape[0]):
-        #     plt.axvline(x=x_half[i])
-        #     plt.axvline(x=peaks_idx[i], color='red')
-        plt.show()
-    return x_half
+        for i in range(2):
+            img, x_half, info = img_list[i], x_half_list[i], info_list[i]
+            col_smooth, col_base, peaks_idx = info["y_smooth"], info["y_base"], info["peaks_idx"]
+            plt.figure()
+            plt.imshow(img, cmap='gray', aspect='auto')
+            # plt.plot(np.arange(col_smooth.shape[0]), col_smooth)
+            # plt.axhline(y=col_base)
+            # for i in range(x_half.shape[0]):
+            #     plt.axvline(x=x_half[i])
+            #     plt.axvline(x=peaks_idx[i], color='red')
+            plt.show()
+            # parent_dir = Path(txt_path).parent
+            # filename = (parent_dir / f"fig_{i}.png").as_posix()
+            # plt.savefig(filename)
+    return x_half_list
 
 if __name__ == "__main__":
 
-    # xhalf = process_one_txt("./TrueData/new_calibration/2025_11_17_14_23_32/Energy.txt", detid=0)
-    # print(xhalf)
+    # col0, col1 = process_one_txt("./TrueData/new_calibration/2025_11_20_11_10_48/Energy.txt", visible=True)
+    # print(col0, col1)
+    # col0, col1 = process_one_txt("./TrueData/new_calibration/2025_11_20_11_12_0/Energy.txt", visible=True)
+    # print(col0, col1)
     
     # id {0: 单缝, 1: 双缝}
     base_dir = Path(r"C:\Users\46595\Learning\BackScatter\code\FlyPoint\TrueData\new_calibration")
-    outputpath0 = f"./data/Calibration_data/cols_calibration0.npy"
-    outputpath1 = f"./data/Calibration_data/cols_calibration1.npy"
+    outputpath0 = f"./data/Calibration_data/cols_calibration0.txt"
+    outputpath1 = f"./data/Calibration_data/cols_calibration1.txt"
 
     # 只保留一级子目录，并按名字排序（就是你 tree 输出来的顺序）
     subdirs = [p for p in base_dir.iterdir() if p.is_dir()]
     subdirs = sorted(subdirs, key=lambda p: p.name)
     cols0, cols1 = [], []
+    matinfo = {"matdir": "./data/Calibration_data",
+               "rows": 44,
+               "cols": 44}
+    # matdir = "./data/Calibration_data"
     for folder in subdirs:
         print("进入文件夹:", folder.name)
         # 找出该文件夹下所有 txt 文件（不递归）
         for fname in os.listdir(folder):
             if fname.lower().endswith(".txt"):
                 txt_path = folder / fname
-                # col0 = process_one_txt(txt_path, detid=0, visible=True)
-                col1 = process_one_txt(txt_path, detid=1, visible=True)
-                # cols0.append(col0)
+                col0, col1 = process_one_txt(txt_path, posdecode=True, matinfo=matinfo, visible=True)
+                cols0.append(col0)
                 cols1.append(col1)
-    np.save(outputpath0, np.array(cols0))
-    np.save(outputpath1, np.array(cols1))
-    
+    # np.savetxt(outputpath0, np.array(cols0))
+    # np.savetxt(outputpath1, np.array(cols1))

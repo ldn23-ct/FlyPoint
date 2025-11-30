@@ -19,13 +19,17 @@ class CalSysTool:
                        prefunc,
                        event,
                        bbox,
-                       delta_x, delta_y, delta_z):
+                       delta_x, delta_y, delta_z,
+                       flypoint):
         '''
         event: ['timestamps', 'x', 'y', 'rail_x', 'rail_y', 'angle']
         '''
         pos_z = prefunc(event[:, 2])
         start_d = self.src[2] - self.slit[0, 2] + 28  # 标定时钨板前表面到狭缝距离28mm
-        pos = np.stack([event[:, 3], event[:, 4] + (start_d + pos_z)*np.tan(np.deg2rad(event[:, 5])), pos_z], axis=1)
+        if flypoint:
+            pos = np.stack([event[:, 3], event[:, 4] + (start_d + pos_z)*np.tan(np.deg2rad(event[:, 5])), pos_z], axis=1)
+        else:
+            pos = np.stack([event[:, 3], event[:, 4], pos_z], axis=1)
 
         Nx = int((bbox[1] - bbox[0]) / delta_x) + 1
         Ny = int((bbox[3] - bbox[2]) / delta_y) + 1
@@ -33,6 +37,7 @@ class CalSysTool:
         V = np.zeros((Nx, Ny, Nz))
         
         mask = (pos[:, 2] < 0) | (pos[:, 2] > 60)
+        # mask = (pos[:, 2] < 0) | (pos[:, 2] > 60) | (pos[:, 1] < 238) | (pos[:, 1] > 278) | (pos[:, 0] < -83) | (pos[:, 0] > 29)
         pos = pos[~mask]
         print(np.max(pos[:, 0]))
         print(np.min(pos[:, 0]))
@@ -232,58 +237,74 @@ if __name__ == "__main__":
                          )
 
     # 单缝标定模型
-    cols_calibration = np.load("./data/Calibration_data/cols_calibration0.npy")
+    cols_calibration = np.loadtxt("./data/Calibration_data/cols_calibration0.txt", delimiter=" ", encoding="utf-8")
     ds_calibration = np.arange(0, 62, 2)
     prefunc0, model0 = toolbox.PreCols(ds_calibration, cols_calibration)
     
     # 双缝标定模型
-    cols_calibration2 = np.load("./data/Calibration_data/cols_calibration1.npy")[:, 0]  #slit2
-    cols_calibration1 = np.load("./data/Calibration_data/cols_calibration1.npy")[:, 1]  #slit1
-    ds_calibration = np.arange(0, 32, 2)
+    cols_calibration2 = np.loadtxt("./data/Calibration_data/cols_calibration1.txt", delimiter=" ", encoding="utf-8")[0:-2, 0]  #slit2
+    cols_calibration1 = np.loadtxt("./data/Calibration_data/cols_calibration1.txt", delimiter=" ", encoding="utf-8")[0:-2, 1]  #slit1
+    ds_calibration = np.arange(0, 30, 2)
     prefunc2, model2 = toolbox.PreCols(ds_calibration, cols_calibration2[:int(ds_calibration.shape[0])])
     prefunc1, model1 = toolbox.PreCols(ds_calibration, cols_calibration1[:int(ds_calibration.shape[0])])
 
-    npy_path0 = './TrueData/test/2025-11-17_15-33_50eda15f/0_events_with_angle.npy'
-    npy_path1 = './TrueData/test/2025-11-17_15-33_50eda15f/1_events_with_angle.npy'
+    npy_path0 = './TrueData/test/2025-11-20_17-37_ac40537a/0_events_with_angle.npy'
+    npy_path1 = './TrueData/test/2025-11-20_17-37_ac40537a/1_events_with_angle.npy'
     event0 = np.load(npy_path0) # ['timestamps', 'x', 'y', 'rail_x', 'rail_y', 'angle']
     event1 = np.load(npy_path1)
     
     # 根据目前标定单缝文件，重建位置距离狭缝 28mm--88mm
-    bbox = [-82, 29, 219, 297, 0, 60]   # 间隔模体数据
-    # bbox = [-104, -2, 138, 228, 0, 60]
-    # bbox = [-140, -6, 218, 294, 0, 60]
-    # bbox = [-5, 5, -5, 5, 0, 60]
+    # bbox = [-83, 29, 208, 308, 0, 60]   # 间隔模体数据
+    # bbox = [-151, 51, 148, 248, 0, 60]    # Al-THU模体数据
+    # bbox = [-161, 41, 206, 306, 0, 60]    # -178模体数据
+    bbox = [-161, 41, 93, 193, 0, 60]    # -65模体数据
+    # bbox = [-21, 31, 208, 308, 0, 60]
     delta_x, delta_y, delta_z = 1, 1, 2
+    flypoint = True
     V0 = toolbox.BackProjection(prefunc0,
                                event0,
                                bbox=bbox,
                                delta_x=delta_x,
                                delta_y=delta_y,
-                               delta_z=delta_z
+                               delta_z=delta_z,
+                               flypoint=flypoint
                                )
     V2 = toolbox.BackProjection(prefunc2,
                                event1,
                                bbox=bbox,
                                delta_x=delta_x,
                                delta_y=delta_y,
-                               delta_z=delta_z
+                               delta_z=delta_z,
+                               flypoint=flypoint
                                )
     V1 = toolbox.BackProjection(prefunc1,
                                event1,
                                bbox=bbox,
                                delta_x=delta_x,
                                delta_y=delta_y,
-                               delta_z=delta_z
+                               delta_z=delta_z,
+                               flypoint=flypoint
                                )
-    Vs = [V0, V2, V1]
-    titles = ["V0", "V2", "V1"]
+    V = np.zeros_like(V0)
+    V[:, :, :] = V0[:, :, :] + V1[:, :, :] + V2[:, :, :]
+    # V[:, :, 20:] = V0[:, :, 20:]
+    Vs = [V0, V2, V1, V]
+    titles = ["V0", "V2", "V1", "V"]
     for i in range(V0.shape[2]):
         fig, axes = plt.subplots(1, len(Vs), figsize=(12, 4), constrained_layout=True)
         for j, ax in enumerate(axes):
-            ax.imshow(Vs[j][:, :, i], cmap='gray', aspect='auto')
+            ax.imshow(Vs[j][:, :, i], cmap='gray', aspect='equal')
             ax.set_title(f"{titles[j]}  |  Slice {i*2}")
             ax.axis('off')
-        plt.show()
+        # plt.show()
+        plt.savefig(f"./fig/{i}.png")
+    
+    # fig, axes = plt.subplots(1, len(Vs), figsize=(12, 4), constrained_layout=True)
+    # for j, ax in enumerate(axes):
+    #     ax.imshow(np.sum(Vs[j], axis=2), cmap='gray', aspect='equal')
+    #     ax.set_title(f"{titles[j]}")
+    #     ax.axis('off')
+    # plt.show()
     
         
     #region : 观测0--60mm深，每1mm对应的列数
